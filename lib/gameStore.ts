@@ -1,17 +1,18 @@
-export interface GameReviewData {
+export interface FinishedGame {
   result: 'win' | 'loss' | 'draw';
   reason: string;
-  moves: string[]; // SAN history
+  level: number;
   playerColor: 'w' | 'b';
-  botName: string;
+  fens: string[]; // start position plus one entry per move
+  san: string[];
+  moves: { from: string; to: string }[];
 }
 
-let lastReview: GameReviewData | null = null;
+let last: FinishedGame | null = null;
 
-export function setLastReview(data: GameReviewData) {
-  lastReview = data;
+export function setLastGame(game: FinishedGame) {
+  last = game;
 }
-
-export function getLastReview(): GameReviewData | null {
-  return lastReview;
+export function getLastGame(): FinishedGame | null {
+  return last;
 }

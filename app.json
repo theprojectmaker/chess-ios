@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "chessbuddy",
     "userInterfaceStyle": "light",
-    "backgroundColor": "#FAFBFC",
+    "backgroundColor": "#FFFFFF",
     "ios": {
       "bundleIdentifier": "com.solyapps.chess",
       "supportsTablet": true,
@@ -18,7 +18,7 @@
     "android": {
       "package": "com.solyapps.chess",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#7BAA5C",
         "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false
@@ -32,13 +32,22 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FAFBFC",
+          "backgroundColor": "#FFFFFF",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 160
+          "imageWidth": 150
         }
       ],
       "expo-status-bar",
-      "expo-system-ui"
+      "expo-system-ui",
+      "expo-font",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

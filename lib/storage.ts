@@ -1,97 +1,121 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const STORAGE_KEY = 'chess-progress-v1';
+const PROGRESS_KEY = 'chess-progress-v2';
+const GAME_KEY = 'chess-current-game-v2';
+
+export const DAILY_GOAL = 30;
+export const XP_PER_LEVEL = 150;
 
 export interface Progress {
   streak: number;
   longestStreak: number;
-  lastPlayedDate: string | null; // yyyy-mm-dd
-  puzzlesSolved: string[];
+  lastActiveDate: string | null;
+  activeDays: string[];
+  xp: number;
+  dailyXp: number;
+  dailyDate: string | null;
+  lessonsDone: Record<string, number>; // lesson id -> best accuracy, 0..100
+  botsPlayed: Record<string, boolean>;
+  botsBeaten: Record<string, boolean>;
   gamesPlayed: number;
   gamesWon: number;
   gamesDrawn: number;
   gamesLost: number;
-  xp: number;
+  puzzlesSolved: number;
+  rushBest: number;
+  sound: boolean;
 }
 
 export const DEFAULT_PROGRESS: Progress = {
   streak: 0,
   longestStreak: 0,
-  lastPlayedDate: null,
-  puzzlesSolved: [],
+  lastActiveDate: null,
+  activeDays: [],
+  xp: 0,
+  dailyXp: 0,
+  dailyDate: null,
+  lessonsDone: {},
+  botsPlayed: {},
+  botsBeaten: {},
   gamesPlayed: 0,
   gamesWon: 0,
   gamesDrawn: 0,
   gamesLost: 0,
-  xp: 0,
+  puzzlesSolved: 0,
+  rushBest: 0,
+  sound: true,
 };
 
-function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+// Local calendar day: a UTC date would roll the streak over in the middle of the evening.
+export function dayKey(date = new Date()): string {
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${m}-${d}`;
 }
 
-function daysBetween(a: string, b: string): number {
-  const msPerDay = 24 * 60 * 60 * 1000;
-  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / msPerDay);
+function previousDay(key: string): string {
+  const [y, m, d] = key.split('-').map(Number);
+  return dayKey(new Date(y, m - 1, d - 1));
 }
 
 export async function loadProgress(): Promise<Progress> {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_PROGRESS };
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_PROGRESS, ...parsed };
+    const raw = await AsyncStorage.getItem(PROGRESS_KEY);
+    const stored: Progress = raw ? { ...DEFAULT_PROGRESS, ...JSON.parse(raw) } : { ...DEFAULT_PROGRESS };
+    const today = dayKey();
+    if (stored.dailyDate !== today) stored.dailyXp = 0;
+    if (stored.lastActiveDate && stored.lastActiveDate !== today && stored.lastActiveDate !== previousDay(today)) stored.streak = 0;
+    return stored;
   } catch {
     return { ...DEFAULT_PROGRESS };
   }
 }
 
-async function saveProgress(progress: Progress): Promise<void> {
+let queue: Promise<unknown> = Promise.resolve();
+
+/** Writes run one at a time, so two quick updates can't overwrite each other. */
+export function updateProgress(change: (p: Progress) => Progress): Promise<Progress> {
+  const run = queue.then(async () => {
+    const next = change(await loadProgress());
+    await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify(next)).catch(() => {});
+    return next;
+  });
+  queue = run.catch(() => {});
+  return run;
+}
+
+/** Practice today: keeps the streak alive, and counts XP toward the daily goal. */
+export function earn(p: Progress, xp: number): Progress {
+  const today = dayKey();
+  const next = { ...p, xp: p.xp + xp };
+  next.dailyXp = (p.dailyDate === today ? p.dailyXp : 0) + xp;
+  next.dailyDate = today;
+  if (p.lastActiveDate !== today) {
+    next.streak = p.lastActiveDate === previousDay(today) ? p.streak + 1 : 1;
+    next.longestStreak = Math.max(p.longestStreak, next.streak);
+    next.lastActiveDate = today;
+    next.activeDays = [...p.activeDays.filter((d) => d !== today), today].slice(-30);
+  }
+  return next;
+}
+
+export const resetProgress = () =>
+  updateProgress((p) => ({ ...DEFAULT_PROGRESS, sound: p.sound }));
+
+export interface SavedGame {
+  level: number;
+  playerColor: 'w' | 'b';
+  moves: string[];
+  hintsLeft: number;
+}
+
+export async function loadSavedGame(): Promise<SavedGame | null> {
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+    const raw = await AsyncStorage.getItem(GAME_KEY);
+    return raw ? JSON.parse(raw) : null;
   } catch {
-    // ignore persistence failures — the app still works for this session
+    return null;
   }
 }
-
-/** Bumps the daily streak at most once per calendar day. */
-function bumpStreak(progress: Progress): Progress {
-  const today = todayKey();
-  if (progress.lastPlayedDate === today) return progress;
-  let streak = 1;
-  if (progress.lastPlayedDate) {
-    const gap = daysBetween(progress.lastPlayedDate, today);
-    streak = gap === 1 ? progress.streak + 1 : 1;
-  }
-  return {
-    ...progress,
-    streak,
-    longestStreak: Math.max(progress.longestStreak, streak),
-    lastPlayedDate: today,
-  };
-}
-
-export async function recordPuzzleSolved(puzzleId: string, xpGain = 10): Promise<Progress> {
-  const current = await loadProgress();
-  let next = bumpStreak(current);
-  if (!next.puzzlesSolved.includes(puzzleId)) {
-    next = { ...next, puzzlesSolved: [...next.puzzlesSolved, puzzleId], xp: next.xp + xpGain };
-  }
-  await saveProgress(next);
-  return next;
-}
-
-export async function recordGameResult(result: 'win' | 'loss' | 'draw', xpGain: number): Promise<Progress> {
-  const current = await loadProgress();
-  let next = bumpStreak(current);
-  next = {
-    ...next,
-    gamesPlayed: next.gamesPlayed + 1,
-    gamesWon: next.gamesWon + (result === 'win' ? 1 : 0),
-    gamesLost: next.gamesLost + (result === 'loss' ? 1 : 0),
-    gamesDrawn: next.gamesDrawn + (result === 'draw' ? 1 : 0),
-    xp: next.xp + xpGain,
-  };
-  await saveProgress(next);
-  return next;
-}
+export const saveGame = (game: SavedGame) => AsyncStorage.setItem(GAME_KEY, JSON.stringify(game)).catch(() => {});
+export const clearSavedGame = () => AsyncStorage.removeItem(GAME_KEY).catch(() => {});

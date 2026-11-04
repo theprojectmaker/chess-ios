@@ -6,13 +6,18 @@
     "start": "expo start",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "check-sdk": "node scripts/check-sdk.cjs"
+    "check-sdk": "node scripts/check-sdk.cjs",
+    "test:engine": "node --no-warnings scripts/test-engine.mjs"
   },
   "dependencies": {
+    "@expo-google-fonts/fredoka": "^0.4.1",
+    "@expo-google-fonts/nunito": "^0.4.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "chess.js": "^1.4.0",
     "expo": "~57.0.31",
+    "expo-audio": "~57.0.5",
     "expo-build-properties": "~57.0.22",
+    "expo-font": "~57.0.4",
     "expo-haptics": "~57.0.3",
     "expo-linking": "~57.0.13",
     "expo-router": "~57.0.28",
