@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ToastHost } from '../components/ToastHost';
 import { setSoundEnabled } from '../lib/sound';
 import { loadProgress } from '../lib/storage';
 import { colors } from '../lib/theme';
@@ -33,9 +34,12 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.page } }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="game" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="local" options={{ gestureEnabled: false }} />
         <Stack.Screen name="lesson" options={{ gestureEnabled: false, animation: 'slide_from_bottom' }} />
         <Stack.Screen name="review" />
+        <Stack.Screen name="teach" options={{ gestureEnabled: false, animation: 'slide_from_bottom' }} />
       </Stack>
+      <ToastHost />
     </SafeAreaProvider>
   );
 }

@@ -48,3 +48,9 @@ node scripts/check-sdk.cjs
 - Nothing here has run on a real device. All testing was the Expo web build plus an iOS bundle
   export. Check drag feel, sound, haptics, and how long the top bots take to move on a phone. Their
   think time is capped, so a slower phone means weaker play from Vera, Ivan and Atlas, not longer waits.
+
+## Offline
+The whole app runs without internet: engine, puzzles, teachers, fonts and sounds are all bundled, and no
+app code makes a network request. `updates.checkAutomatically` is `ON_ERROR_RECOVERY`, so launch never waits
+on a network check. Run `npm run test:labels` after changing `lib/classify.ts`, and
+`node scripts/audit-puzzles.mjs` after changing puzzles.

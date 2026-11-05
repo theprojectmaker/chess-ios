@@ -1,5 +1,6 @@
 export interface FinishedGame {
-  result: 'win' | 'loss' | 'draw';
+  result: 'win' | 'loss' | 'draw'; // for a two-player game, win means White won
+  twoPlayer?: boolean;
   reason: string;
   level: number;
   playerColor: 'w' | 'b';

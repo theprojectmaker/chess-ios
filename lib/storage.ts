@@ -1,4 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ACHIEVEMENTS } from './achievements';
+import { showToast } from './toast';
 
 const PROGRESS_KEY = 'chess-progress-v2';
 const GAME_KEY = 'chess-current-game-v2';
@@ -24,6 +26,14 @@ export interface Progress {
   puzzlesSolved: number;
   rushBest: number;
   sound: boolean;
+  teacher: string;
+  coachOn: boolean;
+  brilliants: number;
+  greats: number;
+  bestCombo: number;
+  dailySolved: number;
+  lastDaily: string | null;
+  earned: string[];
 }
 
 export const DEFAULT_PROGRESS: Progress = {
@@ -44,6 +54,14 @@ export const DEFAULT_PROGRESS: Progress = {
   puzzlesSolved: 0,
   rushBest: 0,
   sound: true,
+  teacher: 'poppy',
+  coachOn: true,
+  brilliants: 0,
+  greats: 0,
+  bestCombo: 0,
+  dailySolved: 0,
+  lastDaily: null,
+  earned: [],
 };
 
 // Local calendar day: a UTC date would roll the streak over in the middle of the evening.
@@ -76,7 +94,13 @@ let queue: Promise<unknown> = Promise.resolve();
 /** Writes run one at a time, so two quick updates can't overwrite each other. */
 export function updateProgress(change: (p: Progress) => Progress): Promise<Progress> {
   const run = queue.then(async () => {
-    const next = change(await loadProgress());
+    const prior = await loadProgress();
+    const next = change(prior);
+    const fresh = ACHIEVEMENTS.filter((a) => !next.earned.includes(a.id) && a.got(next));
+    if (fresh.length) next.earned = [...next.earned, ...fresh.map((a) => a.id)];
+    for (const a of fresh) showToast('New badge', a.name);
+    const level = (xp: number) => Math.floor(xp / XP_PER_LEVEL) + 1;
+    if (level(next.xp) > level(prior.xp)) showToast('Level up', `You reached level ${level(next.xp)}`);
     await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify(next)).catch(() => {});
     return next;
   });
@@ -119,3 +143,19 @@ export async function loadSavedGame(): Promise<SavedGame | null> {
 }
 export const saveGame = (game: SavedGame) => AsyncStorage.setItem(GAME_KEY, JSON.stringify(game)).catch(() => {});
 export const clearSavedGame = () => AsyncStorage.removeItem(GAME_KEY).catch(() => {});
+
+const LOCAL_KEY = 'chess-local-game-v1';
+export interface SavedLocalGame {
+  moves: string[];
+  autoFlip: boolean;
+}
+export async function loadLocalGame(): Promise<SavedLocalGame | null> {
+  try {
+    const raw = await AsyncStorage.getItem(LOCAL_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+export const saveLocalGame = (game: SavedLocalGame) => AsyncStorage.setItem(LOCAL_KEY, JSON.stringify(game)).catch(() => {});
+export const clearLocalGame = () => AsyncStorage.removeItem(LOCAL_KEY).catch(() => {});

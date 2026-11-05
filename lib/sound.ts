@@ -1,4 +1,5 @@
 import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
+import type { Move } from 'chess.js';
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
 
@@ -10,6 +11,15 @@ const SOURCES = {
   wrong: require('../assets/sounds/wrong.wav'),
   win: require('../assets/sounds/win.wav'),
   lose: require('../assets/sounds/lose.wav'),
+  castle: require('../assets/sounds/castle.wav'),
+  promote: require('../assets/sounds/promote.wav'),
+  start: require('../assets/sounds/start.wav'),
+  combo: require('../assets/sounds/combo.wav'),
+  brilliant: require('../assets/sounds/brilliant.wav'),
+  great: require('../assets/sounds/great.wav'),
+  blunder: require('../assets/sounds/blunder.wav'),
+  inaccuracy: require('../assets/sounds/inaccuracy.wav'),
+  levelup: require('../assets/sounds/levelup.wav'),
 };
 export type SoundName = keyof typeof SOURCES;
 
@@ -29,6 +39,14 @@ export function play(name: SoundName) {
   } catch {
     // A missing sound must never interrupt a game.
   }
+}
+
+export function playMove(made: Move, inCheck: boolean) {
+  if (inCheck) play('check');
+  else if (made.promotion) play('promote');
+  else if (made.flags.includes('k') || made.flags.includes('q')) play('castle');
+  else if (made.captured) play('capture');
+  else play('move');
 }
 
 export function haptic(kind: 'light' | 'medium' | 'success' | 'error') {

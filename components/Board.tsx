@@ -21,7 +21,7 @@ interface Props {
   lastMove?: [string, string] | null;
   arrow?: { from: string; to: string; color?: string } | null;
   marks?: Record<string, string>;
-  badge?: { square: string; kind: 'good' | 'bad'; color?: string } | null;
+  badge?: { square: string; kind: 'good' | 'bad'; color?: string; text?: string } | null;
 }
 
 interface Placed {
@@ -300,14 +300,7 @@ export function Board({ fen, size, orientation = 'w', movable = null, onMove, la
 
         {arrow && <Arrow from={toXY(arrow.from)} to={toXY(arrow.to)} cell={cell} size={size} color={arrow.color ?? colors.sky} />}
 
-        {badge && (() => {
-          const { x, y } = toXY(badge.square);
-          return (
-            <View pointerEvents="none" style={[styles.badge, { left: Math.min(x + cell * 0.62, size - cell * 0.42), top: Math.max(y - cell * 0.14, 2), width: cell * 0.44, height: cell * 0.44, borderRadius: cell, backgroundColor: badge.color ?? (badge.kind === 'good' ? colors.leaf : colors.coral) }]}>
-              {badge.kind === 'good' ? <CheckIcon size={cell * 0.3} /> : <CloseIcon size={cell * 0.28} color="#FFFFFF" />}
-            </View>
-          );
-        })()}
+        {badge && <SquareBadge key={badge.square + (badge.text ?? badge.kind)} badge={badge} cell={cell} size={size} at={toXY(badge.square)} />}
 
         <View {...responder.panHandlers} accessibilityLabel="Chess board" style={[StyleSheet.absoluteFill, styles.touch, webNoSelect]} />
 
@@ -333,6 +326,25 @@ export function Board({ fen, size, orientation = 'w', movable = null, onMove, la
         )}
       </View>
     </View>
+  );
+}
+
+function SquareBadge({ badge, cell, size, at }: { badge: NonNullable<Props['badge']>; cell: number; size: number; at: { x: number; y: number } }) {
+  const pop = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(pop, { toValue: 1, friction: 4, tension: 180, useNativeDriver: false }).start();
+  }, [pop]);
+  const d = cell * 0.5;
+  return (
+    <Animated.View pointerEvents="none" style={[styles.badge, { left: Math.min(at.x + cell * 0.6, size - d - 1), top: Math.max(at.y - cell * 0.16, 1), width: d, height: d, borderRadius: cell, backgroundColor: badge.color ?? (badge.kind === 'good' ? colors.leaf : colors.coral), transform: [{ scale: pop }] }]}>
+      {badge.text ? (
+        <Text style={{ color: '#FFFFFF', fontFamily: fonts.displayBold, fontSize: cell * 0.27, lineHeight: cell * 0.32 }}>{badge.text}</Text>
+      ) : badge.kind === 'good' ? (
+        <CheckIcon size={cell * 0.32} />
+      ) : (
+        <CloseIcon size={cell * 0.3} color="#FFFFFF" />
+      )}
+    </Animated.View>
   );
 }
 

@@ -4,13 +4,16 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Board, BOARD_CHROME, type BoardMove } from '../components/Board';
-import { BoltIcon, BulbIcon, CheckIcon, CloseIcon, HeartIcon, StarIcon } from '../components/Icons';
+import { Confetti } from '../components/Confetti';
+import { TeacherBubble, TeacherFace } from '../components/TeacherBubble';
+import { BoltIcon, BulbIcon, CheckIcon, CloseIcon, FlameIcon, HeartIcon, StarIcon } from '../components/Icons';
 import { Piece } from '../components/Piece';
 import { Body, ChunkyButton, Display, ProgressBar, Stat } from '../components/ui';
-import { getLesson, LESSON_SIZE } from '../lib/path';
+import { dailyPuzzle, getLesson } from '../lib/path';
 import { PUZZLES, successLine, THEME_INFO, type Puzzle } from '../lib/puzzles';
-import { haptic, play } from '../lib/sound';
-import { earn, updateProgress } from '../lib/storage';
+import { haptic, play, playMove } from '../lib/sound';
+import { dayKey, DEFAULT_PROGRESS, earn, loadProgress, updateProgress } from '../lib/storage';
+import { getTeacher, pickLine } from '../lib/teachers';
 import { colors, MAX_CONTENT } from '../lib/theme';
 
 type Phase = 'solving' | 'reply' | 'wrong' | 'solved' | 'shown';
@@ -29,8 +32,17 @@ export default function LessonScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ id?: string; mode?: string }>();
   const rush = params.mode === 'rush';
+  const daily = params.mode === 'daily';
   const lesson = params.id ? getLesson(params.id) : undefined;
-  const puzzles = useMemo(() => (rush ? buildRush() : lesson?.puzzles ?? []), [rush, lesson]);
+  const puzzles = useMemo(() => (rush ? buildRush() : daily ? [dailyPuzzle(dayKey())] : lesson?.puzzles ?? []), [rush, daily, lesson]);
+  const [teacherId, setTeacherId] = useState(DEFAULT_PROGRESS.teacher);
+  const teacher = getTeacher(teacherId);
+  const [line, setLine] = useState('');
+  const [combo, setCombo] = useState(0);
+  const [bestCombo, setBestCombo] = useState(0);
+  useEffect(() => {
+    loadProgress().then((p) => setTeacherId(p.teacher));
+  }, []);
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
 
@@ -53,7 +65,11 @@ export default function LessonScreen() {
   const started = useRef(Date.now());
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const later = (fn: () => void, ms: number) => timers.current.push(setTimeout(fn, ms));
+  const pendingRevert = useRef<(() => void) | null>(null);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  // A wrong move stays visible briefly. Any button press must finish that undo first, or the
+  // delayed undo lands on a later puzzle and leaves the board out of step with its solution.
+  const settleWrongMove = () => pendingRevert.current?.();
 
   const panel = useRef(new Animated.Value(0)).current;
   const panelOpen = phase === 'wrong' || phase === 'solved' || phase === 'shown';
@@ -79,7 +95,11 @@ export default function LessonScreen() {
     play(result === 'complete' ? 'win' : 'lose');
     haptic(result === 'complete' ? 'success' : 'medium');
     await updateProgress((p) => {
-      const next = { ...earn(p, earned), puzzlesSolved: p.puzzlesSolved + solved };
+      const next = { ...earn(p, earned), puzzlesSolved: p.puzzlesSolved + solved, bestCombo: Math.max(p.bestCombo, bestCombo) };
+      if (daily && result === 'complete' && solved > 0 && p.lastDaily !== dayKey()) {
+        next.lastDaily = dayKey();
+        next.dailySolved = p.dailySolved + 1;
+      }
       if (rush) next.rushBest = Math.max(p.rushBest, solved);
       if (lesson && result === 'complete') {
         next.lessonsDone = { ...p.lessonsDone, [lesson.id]: Math.max(p.lessonsDone[lesson.id] ?? 0, accuracy) };
@@ -90,6 +110,9 @@ export default function LessonScreen() {
 
   const loadPuzzle = (i: number) => {
     const p = puzzles[i];
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+    pendingRevert.current = null;
     chess.current = new Chess(p.fen);
     setIndex(i);
     setFen(p.fen);
@@ -130,23 +153,34 @@ export default function LessonScreen() {
       setClean(false);
       setMistakes((n) => n + 1);
       setHearts((h) => h - 1);
-      later(() => {
+      setCombo(0);
+      setLine(pickLine(teacher.wrong));
+      const revert = () => {
+        pendingRevert.current = null;
         chess.current = new Chess(before);
         setFen(before);
         setBadge(null);
         setLastMove(step === 0 ? puzzle.last : null);
+      };
+      pendingRevert.current = revert;
+      later(() => {
+        if (pendingRevert.current === revert) revert();
       }, 750);
       return;
     }
 
-    play(made.captured ? 'capture' : 'move');
+    playMove(made, chess.current.isCheck());
     haptic('light');
     setBadge({ square: m.to, kind: 'good' });
     if (step + 1 >= puzzle.line.length) {
-      play('correct');
       haptic('success');
       setPhase('solved');
-      const gain = rush ? 5 : clean ? 10 : 5;
+      const nextCombo = clean ? combo + 1 : 0;
+      setCombo(nextCombo);
+      setBestCombo((b) => Math.max(b, nextCombo));
+      setTimeout(() => play(nextCombo >= 3 ? 'combo' : 'correct'), 140);
+      setLine(pickLine(teacher.correct));
+      const gain = (daily ? 20 : rush ? 5 : clean ? 10 : 5) + Math.min(nextCombo >= 2 ? nextCombo - 1 : 0, 5);
       setSolvedCount((n) => n + 1);
       setXp((x) => x + gain);
       return;
@@ -154,7 +188,7 @@ export default function LessonScreen() {
     setPhase('reply');
     later(() => {
       const reply = chess.current.move(parse(puzzle.line[step + 1]));
-      play(reply.captured ? 'capture' : 'move');
+      playMove(reply, chess.current.isCheck());
       setFen(chess.current.fen());
       setLastMove([reply.from, reply.to]);
       setBadge(null);
@@ -164,6 +198,7 @@ export default function LessonScreen() {
   };
 
   const showAnswer = () => {
+    settleWrongMove();
     const m = parse(puzzle.line[step]);
     setArrow({ from: m.from, to: m.to, color: colors.leaf });
     setPhase('shown');
@@ -177,24 +212,24 @@ export default function LessonScreen() {
 
   const outOfHearts = hearts <= 0;
   const contentWidth = Math.min(width, MAX_CONTENT + 200);
-  const boardSize = Math.floor(Math.max(240, Math.min(contentWidth - 12 - BOARD_CHROME, height - insets.top - insets.bottom - 280)));
+  const boardSize = Math.floor(Math.max(240, Math.min(contentWidth - 12 - BOARD_CHROME, height - insets.top - insets.bottom - 350)));
   const translateY = panel.interpolate({ inputRange: [0, 1], outputRange: [260, 0] });
 
   if (ended) {
     const seconds = Math.round((Date.now() - started.current) / 1000);
     const accuracy = Math.round((solvedCount / Math.max(1, solvedCount + mistakes)) * 100);
     const win = ended === 'complete';
+    const showParty = win || (rush && solvedCount > 0);
     return (
       <View style={[styles.root, styles.center, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 16) }]}>
+        {showParty && <Confetti />}
         <View style={styles.endInner}>
-          <View style={[styles.endIcon, { backgroundColor: win || rush ? colors.sunWash : colors.coralWash }]}>
-            {win || rush ? <StarIcon size={70} /> : <HeartIcon size={64} muted />}
-          </View>
+          <TeacherFace teacher={teacher} size={112} mood={showParty ? 'wow' : 'sad'} />
           <Display size={30} center>
-            {rush ? `${solvedCount} solved` : win ? 'Lesson complete' : 'Out of hearts'}
+            {rush ? `${solvedCount} solved` : daily ? (win && solvedCount ? 'Daily puzzle solved' : 'Try again tomorrow') : win ? 'Lesson complete' : 'Out of hearts'}
           </Display>
           <Body size={16} center>
-            {rush ? 'Run ended after three mistakes.' : win ? 'The next step on your path is open.' : 'Try this lesson again to move on.'}
+            {rush ? 'Run ended after three mistakes.' : daily ? 'A new puzzle arrives tomorrow.' : win ? (bestCombo >= 3 ? `Best run: ${bestCombo} in a row.` : 'The next step on your path is open.') : 'Try this lesson again to move on.'}
           </Body>
           <View style={styles.endStats}>
             <Stat icon={<BoltIcon size={26} />} value={`+${xp}`} label="XP" tint={colors.sunWash} edge={colors.sun} />
@@ -221,7 +256,13 @@ export default function LessonScreen() {
           {rush ? (
             <View style={styles.rushScore}><BoltIcon size={24} /><Display size={22} color={colors.sunLip}>{solvedCount}</Display></View>
           ) : (
-            <ProgressBar value={(index + (phase === 'solved' ? 1 : 0)) / LESSON_SIZE} />
+            <ProgressBar value={(index + (phase === 'solved' ? 1 : 0)) / puzzles.length} />
+          )}
+          {combo >= 2 && (
+            <View style={styles.combo} accessibilityLabel={`${combo} in a row`}>
+              <FlameIcon size={20} />
+              <Display size={16} color={colors.flame}>{combo}</Display>
+            </View>
           )}
           <View style={styles.hearts}>
             {Array.from({ length: HEARTS }).map((_, i) => <HeartIcon key={i} size={24} muted={i >= hearts} />)}
@@ -233,7 +274,7 @@ export default function LessonScreen() {
             <Display size={26}>{info!.prompt}</Display>
             <Body size={15}>{me === 'w' ? 'White' : 'Black'} to move</Body>
           </View>
-          <Piece type="k" color={me} size={50} />
+          <Piece type="k" color={me} size={46} />
         </View>
 
         <View style={styles.boardArea}>
@@ -248,6 +289,10 @@ export default function LessonScreen() {
             arrow={arrow}
             marks={hintSquare ? { [hintSquare]: colors.markGood } : undefined}
           />
+        </View>
+
+        <View style={styles.coach}>
+          <TeacherBubble teacher={teacher} text={step > 0 ? 'Good. Now find the follow-up.' : info!.learn} />
         </View>
 
         {phase === 'solving' && (
@@ -272,12 +317,12 @@ export default function LessonScreen() {
               </Display>
               <Body size={15} color={accent}>
                 {phase === 'solved'
-                  ? successLine(puzzle)
+                  ? `${successLine(puzzle)} ${line}${combo >= 2 ? ` ${combo} in a row!` : ''}`
                   : phase === 'shown'
                     ? 'The green arrow shows the move to play.'
                     : outOfHearts
                       ? rush ? 'That was your last heart.' : 'No hearts left for this lesson.'
-                      : `${hearts} ${hearts === 1 ? 'heart' : 'hearts'} left.`}
+                      : `${line} ${hearts} ${hearts === 1 ? 'heart' : 'hearts'} left.`}
               </Body>
             </View>
           </View>
@@ -290,7 +335,7 @@ export default function LessonScreen() {
           ) : (
             <View style={styles.panelRow}>
               <ChunkyButton style={{ flex: 1 }} label="Show answer" outline onPress={showAnswer} />
-              <ChunkyButton style={{ flex: 1 }} label="Try again" color={colors.coral} lip={colors.coralLip} onPress={() => setPhase('solving')} />
+              <ChunkyButton style={{ flex: 1 }} label="Try again" color={colors.coral} lip={colors.coralLip} onPress={() => { settleWrongMove(); setPhase('solving'); }} />
             </View>
           ))}
         </View>}
@@ -308,13 +353,14 @@ const styles = StyleSheet.create({
   hearts: { flexDirection: 'row', gap: 2 },
   prompt: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingBottom: 8 },
   boardArea: { alignItems: 'center' },
-  hintWrap: { alignItems: 'center', marginTop: 12 },
+  hintWrap: { alignItems: 'center', marginTop: 8 },
+  coach: { marginTop: 10, minHeight: 62, justifyContent: 'center', paddingHorizontal: 4 },
+  combo: { flexDirection: 'row', alignItems: 'center', gap: 1 },
   panel: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 16, paddingHorizontal: 18, alignItems: 'center', zIndex: 100 },
   panelInner: { width: '100%', maxWidth: MAX_CONTENT, gap: 12 },
   panelHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   panelIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   panelRow: { flexDirection: 'row', gap: 10 },
   endInner: { width: '100%', maxWidth: 440, alignItems: 'center', gap: 10 },
-  endIcon: { width: 124, height: 124, borderRadius: 62, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
   endStats: { flexDirection: 'row', gap: 10, marginTop: 10, alignSelf: 'stretch' },
 });

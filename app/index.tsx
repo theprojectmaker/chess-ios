@@ -4,11 +4,14 @@ import { Animated, Easing, Pressable, ScrollView, StyleSheet, Switch, View } fro
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BoardIcon, BoltIcon, ChartIcon, CheckIcon, FlameIcon, LockIcon, PathIcon, StarIcon } from '../components/Icons';
 import { Piece } from '../components/Piece';
+import { TeacherBubble, TeacherFace } from '../components/TeacherBubble';
 import { Body, Card, ChunkyButton, Display, ProgressBar, Sheet, Stat } from '../components/ui';
+import { ACHIEVEMENTS } from '../lib/achievements';
 import { BOTS, getBot, type Bot } from '../lib/bots';
 import { ALL_NODES, currentIndex, isDone, UNITS, type PathNode, type Unit } from '../lib/path';
+import { getTeacher, pickLine, TEACHERS } from '../lib/teachers';
 import { haptic, setSoundEnabled } from '../lib/sound';
-import { DAILY_GOAL, dayKey, DEFAULT_PROGRESS, loadProgress, loadSavedGame, resetProgress, updateProgress, XP_PER_LEVEL, type Progress, type SavedGame } from '../lib/storage';
+import { DAILY_GOAL, dayKey, DEFAULT_PROGRESS, loadLocalGame, loadProgress, loadSavedGame, resetProgress, updateProgress, XP_PER_LEVEL, type Progress, type SavedGame, type SavedLocalGame } from '../lib/storage';
 import { colors, fonts, MAX_CONTENT } from '../lib/theme';
 
 type Tab = 'learn' | 'play' | 'me';
@@ -20,14 +23,16 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>('learn');
   const [progress, setProgress] = useState<Progress>(DEFAULT_PROGRESS);
   const [saved, setSaved] = useState<SavedGame | null>(null);
+  const [savedLocal, setSavedLocal] = useState<SavedLocalGame | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      Promise.all([loadProgress(), loadSavedGame()]).then(([p, g]) => {
+      Promise.all([loadProgress(), loadSavedGame(), loadLocalGame()]).then(([p, g, l]) => {
         if (!active) return;
         setProgress(p);
         setSaved(g);
+        setSavedLocal(l);
       });
       return () => {
         active = false;
@@ -40,7 +45,7 @@ export default function Home() {
       <TopBar progress={progress} />
       <View style={{ flex: 1 }}>
         {tab === 'learn' && <LearnTab progress={progress} />}
-        {tab === 'play' && <PlayTab progress={progress} saved={saved} />}
+        {tab === 'play' && <PlayTab progress={progress} saved={saved} savedLocal={savedLocal} />}
         {tab === 'me' && <MeTab progress={progress} onChange={setProgress} />}
       </View>
       <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
@@ -90,6 +95,8 @@ function LearnTab({ progress }: { progress: Progress }) {
   const router = useRouter();
   const [open, setOpen] = useState<{ node: PathNode; unit: Unit } | null>(null);
   const current = currentIndex(progress);
+  const dailyDone = progress.lastDaily === dayKey();
+  const [hello] = useState(() => pickLine(getTeacher(progress.teacher).hello));
   let index = -1;
 
   const start = () => {
@@ -97,6 +104,7 @@ function LearnTab({ progress }: { progress: Progress }) {
     const { node } = open;
     setOpen(null);
     if (node.kind === 'lesson') router.push({ pathname: '/lesson', params: { id: node.id } });
+    else if (node.kind === 'teach') router.push({ pathname: '/teach', params: { id: node.id } });
     else router.push({ pathname: '/game', params: { level: String(node.level), color: 'r' } });
   };
 
@@ -106,6 +114,19 @@ function LearnTab({ progress }: { progress: Progress }) {
   return (
     <>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <TeacherBubble teacher={getTeacher(progress.teacher)} text={hello} />
+        <Card
+          tint={dailyDone ? colors.leafWash : colors.skyWash}
+          edge={dailyDone ? colors.leaf : colors.sky}
+          style={styles.row}
+          onPress={() => router.push({ pathname: '/lesson', params: { mode: 'daily' } })}
+        >
+          <View style={styles.rushIcon}>{dailyDone ? <CheckIcon size={30} color={colors.leaf} /> : <StarIcon size={32} />}</View>
+          <View style={{ flex: 1 }}>
+            <Display size={20}>Daily puzzle</Display>
+            <Body color={colors.ink}>{dailyDone ? 'Solved today. Come back tomorrow.' : 'One new puzzle a day, worth 20 XP.'}</Body>
+          </View>
+        </Card>
         {UNITS.map((unit, u) => (
           <View key={unit.title} style={styles.unit}>
             <View style={[styles.unitBanner, { backgroundColor: unit.color, borderBottomColor: unit.lip }]}>
@@ -116,7 +137,7 @@ function LearnTab({ progress }: { progress: Progress }) {
             <View style={styles.path}>
               {unit.nodes.map((node, i) => {
                 index++;
-                const state = index < current ? 'done' : index === current ? 'current' : 'locked';
+                const state = node.kind === 'teach' ? (isDone(node, progress) ? 'done' : 'open') : index < current ? 'done' : index === current ? 'current' : 'locked';
                 return (
                   <PathStep
                     key={node.id}
@@ -144,7 +165,7 @@ function LearnTab({ progress }: { progress: Progress }) {
       <Sheet visible={!!open} onClose={() => setOpen(null)}>
         {openNode && (() => {
           const idx = ALL_NODES.indexOf(openNode);
-          const locked = idx > current;
+          const locked = openNode.kind !== 'teach' && idx > current;
           return (
             <>
               <Display size={24}>{openNode.title}</Display>
@@ -153,7 +174,7 @@ function LearnTab({ progress }: { progress: Progress }) {
                 <ChunkyButton label="Finish the earlier steps first" disabled />
               ) : (
                 <ChunkyButton
-                  label={openNode.kind === 'bot' ? `Play ${getBot(openNode.level).name}` : openDone ? 'Practice again' : 'Start lesson'}
+                  label={openNode.kind === 'bot' ? `Play ${getBot(openNode.level).name}` : openDone ? 'Practice again' : openNode.kind === 'teach' ? 'Start with your teacher' : 'Start lesson'}
                   color={open!.unit.color}
                   lip={open!.unit.lip}
                   onPress={start}
@@ -167,7 +188,7 @@ function LearnTab({ progress }: { progress: Progress }) {
   );
 }
 
-function PathStep({ node, unit, state, offset, accuracy, beaten, onPress }: { node: PathNode; unit: Unit; state: 'done' | 'current' | 'locked'; offset: number; accuracy?: number; beaten?: boolean; onPress: () => void }) {
+function PathStep({ node, unit, state, offset, accuracy, beaten, onPress }: { node: PathNode; unit: Unit; state: 'done' | 'current' | 'locked' | 'open'; offset: number; accuracy?: number; beaten?: boolean; onPress: () => void }) {
   const face = state === 'locked' ? colors.line : unit.color;
   const lip = state === 'locked' ? colors.lineLip : unit.lip;
   const bob = useRef(new Animated.Value(0)).current;
@@ -225,7 +246,7 @@ function BotAvatar({ bot, size = 56 }: { bot: Bot; size?: number }) {
   );
 }
 
-function PlayTab({ progress, saved }: { progress: Progress; saved: SavedGame | null }) {
+function PlayTab({ progress, saved, savedLocal }: { progress: Progress; saved: SavedGame | null; savedLocal: SavedLocalGame | null }) {
   const router = useRouter();
   const [picked, setPicked] = useState<Bot | null>(null);
   const [color, setColor] = useState<'w' | 'r' | 'b'>('r');
@@ -249,6 +270,17 @@ function PlayTab({ progress, saved }: { progress: Progress; saved: SavedGame | n
           <View style={{ flex: 1 }}>
             <Display size={20}>Puzzle Rush</Display>
             <Body color={colors.ink}>Three mistakes and it ends. Best: {progress.rushBest}</Body>
+          </View>
+        </Card>
+
+        <Card tint={colors.leafWash} edge={colors.leaf} style={styles.row} onPress={() => router.push({ pathname: '/local', params: savedLocal ? { resume: '1' } : {} })}>
+          <View style={styles.rushIcon}>
+            <View style={{ marginRight: -22 }}><Piece type="k" color="w" size={40} /></View>
+            <Piece type="k" color="b" size={40} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Display size={20}>{savedLocal ? 'Continue pass and play' : 'Pass and play'}</Display>
+            <Body color={colors.ink}>{savedLocal ? `${Math.ceil(savedLocal.moves.length / 2)} moves in` : 'Two players on one device, no internet needed.'}</Body>
           </View>
         </Card>
 
@@ -358,6 +390,56 @@ function MeTab({ progress, onChange }: { progress: Progress; onChange: (p: Progr
         <Stat icon={<Piece type="p" color="b" size={30} />} value={`${progress.gamesDrawn}/${progress.gamesLost}`} label="Draws/losses" />
       </View>
 
+      <Display size={20} style={{ marginTop: 6 }}>Your teacher</Display>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.teachers}>
+        {TEACHERS.map((t) => {
+          const on = progress.teacher === t.id;
+          return (
+            <Pressable
+              key={t.id}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`${t.name}. ${t.style}`}
+              style={[styles.teacherCard, on && { borderColor: t.color, backgroundColor: colors.wash }]}
+              onPress={async () => {
+                haptic('light');
+                onChange(await updateProgress((p) => ({ ...p, teacher: t.id })));
+              }}
+            >
+              <TeacherFace teacher={t} size={58} mood={on ? 'wow' : 'happy'} />
+              <Display size={15} center>{t.name}</Display>
+              <Body size={12} center>{t.style}</Body>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      <Card style={styles.nameRow}>
+        <View style={{ flex: 1 }}>
+          <Body bold color={colors.ink} size={16}>Coach me during games</Body>
+          <Body size={13}>Grades each move right after you play it.</Body>
+        </View>
+        <Switch
+          value={progress.coachOn}
+          trackColor={{ true: colors.leaf, false: colors.line }}
+          onValueChange={async (on) => onChange(await updateProgress((p) => ({ ...p, coachOn: on })))}
+        />
+      </Card>
+
+      <Display size={20} style={{ marginTop: 6 }}>Badges {progress.earned.length}/{ACHIEVEMENTS.length}</Display>
+      <View style={styles.badges}>
+        {ACHIEVEMENTS.map((a) => {
+          const got = progress.earned.includes(a.id);
+          return (
+            <View key={a.id} style={[styles.badge, got && { backgroundColor: colors.sunWash, borderColor: colors.sun }]} accessibilityLabel={`${a.name}, ${a.about}, ${got ? 'earned' : 'not earned yet'}`}>
+              <StarIcon size={28} muted={!got} />
+              <Body size={13} bold center color={got ? colors.ink : colors.muted}>{a.name}</Body>
+              <Body size={11} center>{a.about}</Body>
+            </View>
+          );
+        })}
+      </View>
+
       <Card style={styles.nameRow}>
         <Body bold color={colors.ink} size={16}>Sound effects</Body>
         <Switch
@@ -409,13 +491,17 @@ const styles = StyleSheet.create({
   starBadge: { position: 'absolute', right: 0, top: 0 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  rushIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.page, alignItems: 'center', justifyContent: 'center' },
+  rushIcon: { flexDirection: 'row', width: 52, height: 52, borderRadius: 26, backgroundColor: colors.page, alignItems: 'center', justifyContent: 'center' },
   colorRow: { flexDirection: 'row', gap: 10 },
   colorTile: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 10, borderWidth: 2, borderBottomWidth: 5, borderColor: colors.line, borderRadius: 16 },
   halfPieces: { flexDirection: 'row', height: 46, alignItems: 'center' },
   week: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   day: { alignItems: 'center', gap: 2 },
   statRow: { flexDirection: 'row', gap: 10 },
+  teachers: { gap: 10, paddingVertical: 2 },
+  teacherCard: { width: 132, alignItems: 'center', gap: 4, padding: 10, borderWidth: 2, borderBottomWidth: 5, borderColor: colors.line, borderRadius: 16 },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  badge: { width: '31.5%', flexGrow: 1, alignItems: 'center', gap: 2, padding: 8, borderWidth: 2, borderBottomWidth: 4, borderColor: colors.line, borderRadius: 14 },
   tabBar: { flexDirection: 'row', justifyContent: 'center', borderTopWidth: 2, borderTopColor: colors.line, paddingTop: 8, paddingHorizontal: 8, gap: 8 },
   tabItem: { flex: 1, maxWidth: 180 },
   tabFace: { alignItems: 'center', paddingVertical: 5, borderRadius: 14, borderWidth: 2, borderColor: 'transparent' },

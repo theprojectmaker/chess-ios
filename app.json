@@ -63,7 +63,9 @@
       }
     },
     "updates": {
-      "url": "https://u.expo.dev/d45db850-2a67-4f78-81a9-62297d63861e"
+      "url": "https://u.expo.dev/d45db850-2a67-4f78-81a9-62297d63861e",
+      "checkAutomatically": "ON_ERROR_RECOVERY",
+      "fallbackToCacheTimeout": 0
     }
   }
 }

@@ -42,4 +42,8 @@ export function bookMove(historySan: string[], random: () => number = Math.rando
   return list[Math.floor(random() * list.length)];
 }
 
+export function inBook(historySan: string[]): boolean {
+  return LINES.some((line) => line.length >= historySan.length && historySan.every((san, i) => line[i] === san));
+}
+
 export const BOOK_LINES = LINES;

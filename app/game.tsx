@@ -5,59 +5,31 @@ import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 're
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Board, BOARD_CHROME, type BoardMove } from '../components/Board';
 import { BackIcon, BoltIcon, BulbIcon, FlagIcon, FlipIcon, StarIcon, UndoIcon } from '../components/Icons';
+import { Confetti } from '../components/Confetti';
+import { ActionButton, CapturedRow, capturedFrom, LabelDot } from '../components/gameParts';
+import { TeacherBubble, type Mood } from '../components/TeacherBubble';
 import { Piece } from '../components/Piece';
 import { Body, ChunkyButton, Display, Sheet } from '../components/ui';
-import { bookMove } from '../lib/book';
+import { evaluatePosition, type PositionEval } from '../lib/analysis';
+import { bookMove, inBook } from '../lib/book';
 import { getBot } from '../lib/bots';
+import { classify, explainWeakMove, LABELS, type Label } from '../lib/classify';
 import { cancelThinking, think } from '../lib/engineClient';
 import { setLastGame } from '../lib/gameStore';
-import { haptic, play } from '../lib/sound';
-import { clearSavedGame, earn, loadSavedGame, saveGame, updateProgress } from '../lib/storage';
+import { haptic, play, playMove, type SoundName } from '../lib/sound';
+import { clearSavedGame, DEFAULT_PROGRESS, earn, loadProgress, loadSavedGame, saveGame, updateProgress } from '../lib/storage';
+import { getTeacher, pickLine } from '../lib/teachers';
 import { colors, MAX_CONTENT } from '../lib/theme';
 
-const START_COUNT: Record<string, number> = { p: 8, n: 2, b: 2, r: 2, q: 1 };
-const VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9 };
-const ORDER = ['q', 'r', 'b', 'n', 'p'];
 const HINTS = 3;
+const COACH_MS = 220;
+const LABEL_SOUND: Partial<Record<Label, SoundName>> = { brilliant: 'brilliant', great: 'great', blunder: 'blunder', mistake: 'wrong', miss: 'wrong', inaccuracy: 'inaccuracy' };
 
-function capturedFrom(fen: string) {
-  const counts: Record<string, number> = {};
-  for (const ch of fen.split(' ')[0]) if (/[a-zA-Z]/.test(ch)) counts[ch] = (counts[ch] ?? 0) + 1;
-  // Lost pieces per color. Promotions can push a count over its start value, so clamp at zero.
-  const lost = { w: [] as string[], b: [] as string[] };
-  let diff = 0;
-  for (const type of ORDER) {
-    const white = counts[type.toUpperCase()] ?? 0;
-    const black = counts[type] ?? 0;
-    for (let i = white; i < START_COUNT[type]; i++) lost.w.push(type);
-    for (let i = black; i < START_COUNT[type]; i++) lost.b.push(type);
-    diff += (white - black) * VALUE[type];
-  }
-  return { lost, diff };
-}
-
-function CapturedRow({ pieces, color, advantage }: { pieces: string[]; color: 'w' | 'b'; advantage: number }) {
-  return (
-    <View style={styles.captured}>
-      {pieces.map((t, i) => (
-        <View key={i} style={{ marginRight: -8 }}><Piece type={t} color={color} size={20} /></View>
-      ))}
-      {advantage > 0 && <Body size={13} bold style={{ marginLeft: 12 }}>+{advantage}</Body>}
-    </View>
-  );
-}
-
-function ActionButton({ label, icon, onPress, disabled }: { label: string; icon: React.ReactNode; onPress: () => void; disabled?: boolean }) {
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress} style={[styles.action, disabled && { opacity: 0.4 }]}>
-      {({ pressed }) => (
-        <View style={[styles.actionFace, { borderBottomWidth: pressed ? 2 : 5, marginTop: pressed ? 3 : 0 }]}>
-          {icon}
-          <Body size={12} bold>{label}</Body>
-        </View>
-      )}
-    </Pressable>
-  );
+interface Feedback {
+  label: Label;
+  square: string;
+  text: string;
+  mood: Mood;
 }
 
 interface Result {
@@ -90,6 +62,14 @@ export default function GameScreen() {
   const [confirmResign, setConfirmResign] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const moveStrip = useRef<ScrollView>(null);
+  const [teacherId, setTeacherId] = useState(DEFAULT_PROGRESS.teacher);
+  const [coachOn, setCoachOn] = useState(true);
+  const [greeting, setGreeting] = useState('');
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [celebrate, setCelebrate] = useState(0);
+  const teacher = getTeacher(teacherId);
+  // The position the bot just moved from, kept so its move can be graded and a Miss detected.
+  const botChoice = useRef<{ fen: string; evaluation: PositionEval; move?: { from: string; to: string; promotion?: string } } | null>(null);
 
   const lastMove = useMemo<[string, string] | null>(() => {
     const h = chess.current.history({ verbose: true });
@@ -161,9 +141,7 @@ export default function GameScreen() {
       return null;
     }
     fens.current.push(before);
-    if (c.isCheck()) play('check');
-    else if (made.captured) play('capture');
-    else play('move');
+    playMove(made, c.isCheck());
     setFen(c.fen());
     setHint(null);
     return made;
@@ -185,7 +163,8 @@ export default function GameScreen() {
       const wait = 420 - (Date.now() - begin);
       if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       if (my !== token.current || !move) return;
-      applyMove(move);
+      const played = applyMove(move);
+      if (played && botChoice.current) botChoice.current.move = { from: played.from, to: played.to, promotion: played.promotion };
       setThinking(false);
       persist(color, hints);
       checkEnd(color);
@@ -198,6 +177,11 @@ export default function GameScreen() {
     (async () => {
       let color: 'w' | 'b' = 'w';
       let hints = HINTS;
+      const progress = await loadProgress();
+      if (!live) return;
+      setTeacherId(progress.teacher);
+      setCoachOn(progress.coachOn);
+      setGreeting(pickLine(getTeacher(progress.teacher).hello));
       if (params.resume) {
         const saved = await loadSavedGame();
         if (!live) return;
@@ -218,6 +202,7 @@ export default function GameScreen() {
       setHintsLeft(hints);
       setFen(chess.current.fen());
       setReady(true);
+      play('start');
       if (!chess.current.isGameOver() && chess.current.turn() !== color) botTurn(color, hints);
     })();
     return () => {
@@ -229,11 +214,67 @@ export default function GameScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const gradeThenReply = async (before: string, prior: string[], moved: { from: string; to: string; promotion?: string }, lastTo: string | undefined) => {
+    const my = ++token.current;
+    setThinking(true);
+    const c = chess.current;
+    const after = c.fen();
+    let label: Label = 'book';
+    let text = '';
+    if (inBook(c.history())) {
+      botChoice.current = null;
+      text = pickLine(teacher.say.book);
+    } else {
+      const A = await evaluatePosition(before, prior, COACH_MS);
+      if (my !== token.current) return;
+      const B = await evaluatePosition(after, [...prior, before], COACH_MS);
+      if (my !== token.current) return;
+      const choice = botChoice.current;
+      const previous = choice?.move
+        ? classify({ fen: choice.fen, move: choice.move, bestUci: choice.evaluation.bestUci, bestScore: choice.evaluation.score, secondScore: choice.evaluation.secondScore, afterScore: -A.score })
+        : null;
+      label = classify({ fen: before, move: moved, bestUci: A.bestUci, bestScore: A.score, secondScore: A.secondScore, afterScore: -B.score, previous }, lastTo);
+      botChoice.current = { fen: after, evaluation: B };
+      text = pickLine(teacher.say[label]);
+      if (label === 'mistake' || label === 'blunder' || label === 'miss') {
+        let better: string | null = null;
+        try {
+          better = A.bestUci ? new Chess(before).move({ from: A.bestUci.slice(0, 2), to: A.bestUci.slice(2, 4), promotion: A.bestUci[4] }).san : null;
+        } catch {
+          better = null;
+        }
+        text = explainWeakMove(after, B.bestUci, better);
+      }
+    }
+    setFeedback({ label, square: moved.to, text, mood: label === 'brilliant' || label === 'great' ? 'wow' : ['mistake', 'blunder', 'miss'].includes(label) ? 'sad' : 'happy' });
+    const sound = LABEL_SOUND[label];
+    if (sound) play(sound);
+    if (label === 'brilliant') {
+      setCelebrate((n) => n + 1);
+      haptic('success');
+      updateProgress((p) => ({ ...earn(p, 10), brilliants: p.brilliants + 1 }));
+    } else if (label === 'great') {
+      haptic('success');
+      updateProgress((p) => ({ ...earn(p, 3), greats: p.greats + 1 }));
+    } else if (label === 'blunder') {
+      haptic('error');
+    }
+    botTurn(playerColor, hintsLeft);
+  };
+
   const onPlayerMove = (move: BoardMove) => {
-    if (!applyMove(move)) return;
+    const before = chess.current.fen();
+    const prior = [...fens.current];
+    const previousMoves = chess.current.history({ verbose: true });
+    const lastTo = previousMoves[previousMoves.length - 1]?.to;
+    const made = applyMove(move);
+    if (!made) return;
     haptic('light');
     persist(playerColor, hintsLeft);
-    if (!checkEnd(playerColor)) botTurn(playerColor, hintsLeft);
+    setFeedback(null);
+    if (checkEnd(playerColor)) return;
+    if (coachOn) gradeThenReply(before, prior, { from: made.from, to: made.to, promotion: made.promotion }, lastTo);
+    else botTurn(playerColor, hintsLeft);
   };
 
   const canUndo = !result && !finished.current && chess.current.history().some((_, i) => (i % 2 === 0) === (playerColor === 'w'));
@@ -252,6 +293,8 @@ export default function GameScreen() {
       fens.current.pop();
     }
     setHint(null);
+    setFeedback(null);
+    botChoice.current = null;
     setFen(c.fen());
     persist(playerColor, hintsLeft);
   };
@@ -274,7 +317,7 @@ export default function GameScreen() {
 
   const orientation: 'w' | 'b' = flipped ? (playerColor === 'w' ? 'b' : 'w') : playerColor;
   const contentWidth = Math.min(width, MAX_CONTENT + 200);
-  const boardSize = Math.floor(Math.max(240, Math.min(contentWidth - 12 - BOARD_CHROME, height - insets.top - insets.bottom - 310)));
+  const boardSize = Math.floor(Math.max(240, Math.min(contentWidth - 12 - BOARD_CHROME, height - insets.top - insets.bottom - (coachOn ? 372 : 310))));
   const botColor = playerColor === 'w' ? 'b' : 'w';
   // chess.current.turn() and the move list read directly from the board state on each render.
   const playersMove = ready && !thinking && !result && !finished.current && chess.current.turn() === playerColor;
@@ -310,6 +353,7 @@ export default function GameScreen() {
             onMove={onPlayerMove}
             lastMove={lastMove}
             arrow={hint}
+            badge={feedback ? { square: feedback.square, kind: 'good', color: LABELS[feedback.label].color, text: LABELS[feedback.label].symbol } : null}
           />
         </View>
 
@@ -322,6 +366,24 @@ export default function GameScreen() {
             <CapturedRow pieces={botColor === 'w' ? lost.w : lost.b} color={botColor} advantage={playerColor === 'w' ? diff : -diff} />
           </View>
         </View>
+
+        {coachOn && (
+          <View style={styles.coach}>
+            <TeacherBubble
+              teacher={teacher}
+              mood={feedback?.mood}
+              tint={feedback ? LABELS[feedback.label].wash : undefined}
+              edge={feedback ? LABELS[feedback.label].color : undefined}
+              text={feedback ? feedback.text : greeting}
+              chip={feedback ? (
+                <View style={styles.chip}>
+                  <LabelDot label={feedback.label} size={18} />
+                  <Body size={13} bold color={LABELS[feedback.label].color}>{LABELS[feedback.label].name}</Body>
+                </View>
+              ) : undefined}
+            />
+          </View>
+        )}
 
         <ScrollView ref={moveStrip} horizontal showsHorizontalScrollIndicator={false} style={styles.strip} contentContainerStyle={styles.stripInner}>
           {history.length === 0 && <Body size={14} color={colors.faint}>Moves appear here</Body>}
@@ -341,6 +403,8 @@ export default function GameScreen() {
         </View>
       </View>
 
+      {celebrate > 0 && <Confetti key={celebrate} />}
+
       <Sheet visible={confirmResign} onClose={() => setConfirmResign(false)}>
         <Display size={22}>Resign this game?</Display>
         <Body size={16}>{bot.name} gets the win. You can still review the game afterwards.</Body>
@@ -359,6 +423,7 @@ export default function GameScreen() {
       <Sheet visible={!!result} canDismiss={false}>
         {result && (
           <>
+            {result.kind === 'win' && <Confetti />}
             <View style={styles.resultHead}>
               <View style={[styles.resultIcon, { backgroundColor: result.kind === 'win' ? colors.sunWash : result.kind === 'draw' ? colors.skyWash : colors.wash }]}>
                 {result.kind === 'win' ? <StarIcon size={46} /> : <Piece type="k" color={result.kind === 'draw' ? 'w' : 'b'} size={54} />}
@@ -390,14 +455,13 @@ const styles = StyleSheet.create({
   playerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 8, paddingVertical: 6 },
   topNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 6 },
   middle: { flex: 1, justifyContent: 'center' },
+  coach: { minHeight: 66, justifyContent: 'center', paddingBottom: 2 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   back: { padding: 2 },
-  captured: { flexDirection: 'row', alignItems: 'center', height: 22, paddingRight: 8 },
   boardArea: { alignItems: 'center', justifyContent: 'center', paddingVertical: 2 },
   strip: { flexGrow: 0, marginHorizontal: 8 },
   stripInner: { gap: 10, alignItems: 'center', height: 26 },
   actions: { flexDirection: 'row', gap: 8, paddingHorizontal: 8, paddingTop: 6 },
-  action: { flex: 1 },
-  actionFace: { alignItems: 'center', gap: 2, paddingVertical: 7, borderWidth: 2, borderColor: colors.line, borderRadius: 14 },
   resultHead: { alignItems: 'center', gap: 6 },
   resultIcon: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center' },
   xpRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
