@@ -13,13 +13,15 @@ import { Piece } from '../components/Piece';
 import { Body, ChunkyButton, Display, Sheet } from '../components/ui';
 import { evaluatePosition, type PositionEval } from '../lib/analysis';
 import { bookMove, inBook } from '../lib/book';
-import { getBot } from '../lib/bots';
-import { classify, explainWeakMove, LABELS, type Label } from '../lib/classify';
+import { BOTS, getBot } from '../lib/bots';
+import { coachLine, tipFor } from '../lib/coaching';
+import { bandFor, newRating, START_RATING } from '../lib/elo';
+import { classify, LABELS, type Label } from '../lib/classify';
 import { cancelThinking, think } from '../lib/engineClient';
 import { recordGame } from '../lib/gameStore';
 import { getEndgame, MODE_INFO, queenOddsFen, shuffleFen, STANDARD_FEN, type GameMode } from '../lib/variants';
 import { haptic, play, playMove, type SoundName } from '../lib/sound';
-import { clearSavedGame, DEFAULT_PROGRESS, earn, loadProgress, loadSavedGame, saveGame, updateProgress } from '../lib/storage';
+import { clearSavedGame, DEFAULT_PROGRESS, earn, loadProgress, loadSavedGame, saveGame, updateProgress, withRating } from '../lib/storage';
 import { getTeacher, pickLine } from '../lib/teachers';
 import { colors, MAX_CONTENT } from '../lib/theme';
 
@@ -45,6 +47,9 @@ interface Result {
   xp: number;
   firstBeat: boolean;
   gameId: string;
+  rated: boolean;
+  rating: number;
+  delta: number;
   tally: Partial<Record<Label, number>>;
 }
 
@@ -53,7 +58,7 @@ export default function GameScreen() {
   const params = useLocalSearchParams<{ level?: string; color?: string; resume?: string; mode?: string; minutes?: string; endgame?: string; gauntlet?: string }>();
   const endgame = getEndgame(params.endgame);
   const gauntlet = params.gauntlet === '1';
-  const level = endgame ? 8 : Number(params.level ?? 1);
+  const level = endgame ? BOTS.length : Number(params.level ?? 1);
   const bot = getBot(level);
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -74,6 +79,8 @@ export default function GameScreen() {
   const [result, setResult] = useState<Result | null>(null);
   const moveStrip = useRef<ScrollView>(null);
   const startFen = useRef(STANDARD_FEN);
+  const [myRating, setMyRating] = useState(START_RATING);
+  const assisted = useRef(false);
   const [minutes, setMinutes] = useState(0);
   const [mode, setMode] = useState<GameMode>('standard');
   const clockRef = useRef<{ w: number; b: number } | null>(null);
@@ -100,7 +107,7 @@ export default function GameScreen() {
 
   const persist = useCallback((color: 'w' | 'b', hints: number) => {
     const moves = chess.current.history({ verbose: true }).map((m) => m.from + m.to + (m.promotion ?? ''));
-    saveGame({ level, playerColor: color, moves, hintsLeft: hints, startFen: startFen.current, minutes: clockRef.current ? minutes : 0, clocks: clockRef.current ?? undefined, mode, endgame: params.endgame, gauntlet });
+    saveGame({ level, playerColor: color, moves, hintsLeft: hints, assisted: assisted.current, startFen: startFen.current, minutes: clockRef.current ? minutes : 0, clocks: clockRef.current ?? undefined, mode, endgame: params.endgame, gauntlet });
   }, [level, minutes, mode, params.endgame, gauntlet]);
 
   const finish = useCallback(async (kind: Result['kind'], reason: string, color: 'w' | 'b') => {
@@ -114,10 +121,16 @@ export default function GameScreen() {
     const bonus = (t.best ?? 0) + (t.excellent ?? 0);
     const xp = (endgame ? (kind === 'win' ? 25 : 5) : kind === 'win' ? 15 + level * 5 : kind === 'draw' ? 10 + level : 5) + bonus;
     let firstBeat = false;
+    const rated = !endgame && mode !== 'odds' && !assisted.current && chess.current.history().length >= 2;
+    let rating = 0;
+    let delta = 0;
     await updateProgress((p) => {
       firstBeat = kind === 'win' && !p.botsBeaten[level];
+      rating = rated ? newRating(p.rating, bot.elo, kind === 'win' ? 1 : kind === 'draw' ? 0.5 : 0, p.ratedGames) : p.rating;
+      delta = rating - p.rating;
+      const base = rated ? withRating(p, rating) : p;
       return {
-        ...earn(p, xp),
+        ...earn(base, xp),
         endgamesDone: endgame && kind === 'win' ? { ...p.endgamesDone, [endgame.id]: true } : p.endgamesDone,
         gauntletBest: gauntlet && kind === 'win' ? Math.max(p.gauntletBest, level) : p.gauntletBest,
         gamesPlayed: p.gamesPlayed + 1,
@@ -131,8 +144,8 @@ export default function GameScreen() {
     const gameId = recordGame(chess.current, { result: kind, reason, level, playerColor: color, title: endgame ? endgame.name : mode !== 'standard' ? MODE_INFO[mode].name : undefined }, startFen.current);
     play(kind === 'win' ? 'win' : kind === 'loss' ? 'lose' : 'move');
     haptic(kind === 'win' ? 'success' : 'medium');
-    setTimeout(() => setResult({ kind, reason, xp, firstBeat, gameId, tally: { ...t } }), 650);
-  }, [level, endgame, gauntlet, mode]);
+    setTimeout(() => setResult({ kind, reason, xp, firstBeat, gameId, tally: { ...t }, rated, rating, delta }), 650);
+  }, [level, endgame, gauntlet, mode, bot.elo]);
 
   const checkEnd = useCallback((color: 'w' | 'b') => {
     const c = chess.current;
@@ -196,13 +209,15 @@ export default function GameScreen() {
       if (!live) return;
       setTeacherId(progress.teacher);
       setCoachOn(progress.coachOn);
-      setGreeting(pickLine(getTeacher(progress.teacher).hello));
+      setMyRating(progress.rating);
+      setGreeting(tipFor(progress.rating));
       if (params.resume) {
         const saved = await loadSavedGame();
         if (!live) return;
         if (saved) {
           color = saved.playerColor;
           hints = saved.hintsLeft;
+          assisted.current = !!saved.assisted;
           startFen.current = saved.startFen ?? STANDARD_FEN;
           chess.current = new Chess(startFen.current);
           if (saved.mode) setMode(saved.mode);
@@ -272,20 +287,17 @@ export default function GameScreen() {
       if (my !== token.current) return;
       const choice = botChoice.current;
       const previous = choice?.move
-        ? classify({ fen: choice.fen, move: choice.move, bestUci: choice.evaluation.bestUci, bestScore: choice.evaluation.score, secondScore: choice.evaluation.secondScore, afterScore: -A.score })
+        ? classify({ fen: choice.fen, move: choice.move, bestUci: choice.evaluation.bestUci, bestScore: choice.evaluation.score, secondScore: choice.evaluation.secondScore, afterScore: -A.score, rating: bot.elo })
         : null;
-      label = classify({ fen: before, move: moved, bestUci: A.bestUci, bestScore: A.score, secondScore: A.secondScore, afterScore: -B.score, previous }, lastTo);
+      label = classify({ fen: before, move: moved, bestUci: A.bestUci, bestScore: A.score, secondScore: A.secondScore, afterScore: -B.score, previous, rating: myRating }, lastTo);
       botChoice.current = { fen: after, evaluation: B };
-      text = pickLine(teacher.say[label]);
-      if (label === 'mistake' || label === 'blunder' || label === 'miss') {
-        let better: string | null = null;
-        try {
-          better = A.bestUci ? new Chess(before).move({ from: A.bestUci.slice(0, 2), to: A.bestUci.slice(2, 4), promotion: A.bestUci[4] }).san : null;
-        } catch {
-          better = null;
-        }
-        text = explainWeakMove(after, B.bestUci, better);
+      let better: string | null = null;
+      try {
+        better = A.bestUci ? new Chess(before).move({ from: A.bestUci.slice(0, 2), to: A.bestUci.slice(2, 4), promotion: A.bestUci[4] }).san : null;
+      } catch {
+        better = null;
       }
+      text = coachLine({ rating: myRating, teacher, label, fenAfter: after, replyUci: B.bestUci, betterSan: better, scoreBefore: A.score, scoreAfter: -B.score });
     }
     setFeedback({ label, square: moved.to, text, mood: label === 'brilliant' || label === 'great' ? 'wow' : ['mistake', 'blunder', 'miss'].includes(label) ? 'sad' : 'happy' });
     const sound = LABEL_SOUND[label];
@@ -350,6 +362,7 @@ export default function GameScreen() {
 
   const canUndo = !minutes && !result && !finished.current && chess.current.history().some((_, i) => (i % 2 === 0) === (playerColor === 'w'));
   const undo = () => {
+    assisted.current = true;
     token.current++;
     cancelThinking();
     setThinking(false);
@@ -377,6 +390,7 @@ export default function GameScreen() {
     const r = await think(chess.current.fen(), fens.current, { maxDepth: 12, timeMs: 700 });
     setHintBusy(false);
     if (r.best) {
+      assisted.current = true;
       setHint({ from: r.best.from, to: r.best.to });
       setHintsLeft(hintsLeft - 1);
       persist(playerColor, hintsLeft - 1);
@@ -401,7 +415,7 @@ export default function GameScreen() {
           <Pressable accessibilityRole="button" accessibilityLabel="Back to home" onPress={() => router.back()} hitSlop={10} style={styles.back}>
             <BackIcon size={26} />
           </Pressable>
-          <Body size={13} bold color={colors.faint}>{[endgame ? endgame.name.toUpperCase() : `LEVEL ${bot.level}`, gauntlet ? 'GAUNTLET' : null, mode !== 'standard' ? MODE_INFO[mode].name.toUpperCase() : null, minutes ? `${minutes} MIN` : null].filter(Boolean).join(' · ')}</Body>
+          <Body size={13} bold color={colors.faint}>{[endgame ? endgame.name.toUpperCase() : `${bot.elo} ELO`, gauntlet ? 'GAUNTLET' : null, mode !== 'standard' ? MODE_INFO[mode].name.toUpperCase() : null, minutes ? `${minutes} MIN` : null].filter(Boolean).join(' · ')}</Body>
         </View>
         <View style={styles.middle}>
         <View style={styles.playerRow}>
@@ -441,7 +455,7 @@ export default function GameScreen() {
             <Piece type="k" color={playerColor} size={36} />
           </View>
           <View style={{ flex: 1 }}>
-            <Display size={18}>{playersMove ? 'Your move' : 'You'}</Display>
+            <Display size={18}>{playersMove ? 'Your move' : 'You'}{` (${myRating})`}</Display>
             <CapturedRow pieces={botColor === 'w' ? lost.w : lost.b} color={botColor} advantage={playerColor === 'w' ? diff : -diff} />
           </View>
           {goodRun >= 2 && (
@@ -525,6 +539,15 @@ export default function GameScreen() {
                 <BoltIcon size={24} />
                 <Display size={20} color={colors.sunLip}>+{result.xp} XP</Display>
               </View>
+              {result.rated ? (
+                <View style={styles.eloRow} accessibilityLabel={`Your rating is now ${result.rating}`}>
+                  <Display size={30} color={colors.ink}>{result.rating}</Display>
+                  <Display size={20} color={result.delta >= 0 ? colors.leafLip : colors.coral}>{`${result.delta >= 0 ? '+' : ''}${result.delta}`}</Display>
+                  <Body size={13} bold>{bandFor(result.rating).name}</Body>
+                </View>
+              ) : !endgame && mode !== 'odds' ? (
+                <Body size={13} center>Not rated: you used undo or a hint.</Body>
+              ) : null}
               {Object.keys(result.tally).length > 0 && (
                 <View style={styles.tally}>
                   {(['brilliant', 'great', 'best', 'excellent', 'mistake', 'blunder'] as Label[]).filter((l) => result.tally[l]).map((l) => (
@@ -538,7 +561,7 @@ export default function GameScreen() {
             </View>
             <ChunkyButton label="Review game" color={colors.sky} lip={colors.skyLip} onPress={() => router.replace({ pathname: '/review', params: { id: result.gameId } })} />
             <View style={styles.resultRow}>
-              {gauntlet && result.kind === 'win' && level < 8 ? (
+              {gauntlet && result.kind === 'win' && level < BOTS.length ? (
                 <ChunkyButton style={{ flex: 1 }} label={`Next: ${getBot(level + 1).name}`} onPress={() => router.replace({ pathname: '/game', params: { level: String(level + 1), color: 'r', gauntlet: '1', rematch: String(Date.now()) } })} />
               ) : (
                 <ChunkyButton style={{ flex: 1 }} label={endgame ? 'Try again' : gauntlet ? 'Restart' : 'Rematch'} outline onPress={() => router.replace({ pathname: '/game', params: { level: gauntlet ? '1' : String(level), color: gauntlet ? 'r' : playerColor === 'w' ? 'b' : 'w', mode, minutes: String(minutes), endgame: params.endgame ?? '', gauntlet: gauntlet ? '1' : '', rematch: String(Date.now()) } })} />
@@ -560,6 +583,7 @@ const styles = StyleSheet.create({
   middle: { flex: 1, justifyContent: 'center' },
   clock: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, backgroundColor: colors.wash, borderWidth: 2, borderColor: colors.line },
   clockOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+  eloRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   run: { flexDirection: 'row', alignItems: 'center', gap: 1 },
   tally: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 4 },
   tallyChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },

@@ -12,7 +12,7 @@ const parts = process.argv.slice(3);
 const e = new Engine();
 const parse = (u) => ({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] });
 const uci = (m) => m.from + m.to + (m.promotion ?? '');
-const CAP = { mate1: 25, mate2: 25, mate3: 20, backRank: 20, hanging: 20, fork: 20, pin: 15, skewer: 15, discovered: 15, promotion: 15, material: 25 };
+const CAP = {};
 
 const seen = new Set();
 const all = [];
@@ -109,7 +109,7 @@ const byTheme = {};
 for (const p of kept) (byTheme[p.theme] ??= []).push(p);
 const out = [];
 for (const theme of Object.keys(byTheme)) {
-  const list = byTheme[theme].sort((a, b) => a.line.length - b.line.length).slice(0, CAP[theme] ?? 20);
+  const list = byTheme[theme].sort((a, b) => a.line.length - b.line.length).slice(0, CAP[theme] ?? 999);
   list.forEach((p, i) => out.push({ id: `${theme}-${i + 1}`, ...p }));
 }
 const target = path.join(import.meta.dirname, '..', 'lib', 'puzzles.json');

@@ -2,13 +2,15 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { BoardIcon, BoltIcon, ChartIcon, CheckIcon, FlameIcon, LockIcon, PathIcon, StarIcon } from '../components/Icons';
 import { Piece } from '../components/Piece';
 import { TeacherBubble, TeacherFace } from '../components/TeacherBubble';
 import { Body, Card, ChunkyButton, Display, ProgressBar, Sheet, Stat } from '../components/ui';
 import { ACHIEVEMENTS } from '../lib/achievements';
 import { BOTS, getBot, type Bot } from '../lib/bots';
-import { ALL_NODES, currentIndex, isDone, UNITS, type PathNode, type Unit } from '../lib/path';
+import { bandFor, nextBand, ratingStakes } from '../lib/elo';
+import { ALL_NODES, currentIndex, isDone, isLocked, unitForRating, UNITS, type PathNode, type Unit } from '../lib/path';
 import { getTeacher, pickLine, TEACHERS } from '../lib/teachers';
 import { haptic, play, setSoundEnabled, setSoundStyle, SOUND_STYLES } from '../lib/sound';
 import { CLOCKS, ENDGAMES, MODE_INFO, type GameMode } from '../lib/variants';
@@ -25,6 +27,7 @@ export default function Home() {
   const [progress, setProgress] = useState<Progress>(DEFAULT_PROGRESS);
   const [saved, setSaved] = useState<SavedGame | null>(null);
   const [savedLocal, setSavedLocal] = useState<SavedLocalGame | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -34,6 +37,7 @@ export default function Home() {
         setProgress(p);
         setSaved(g);
         setSavedLocal(l);
+        setLoaded(true);
       });
       return () => {
         active = false;
@@ -54,6 +58,54 @@ export default function Home() {
         <TabButton label="Play" active={tab === 'play'} onPress={() => setTab('play')} icon={(c) => <BoardIcon color={c} />} />
         <TabButton label="Progress" active={tab === 'me'} onPress={() => setTab('me')} icon={(c) => <ChartIcon color={c} />} />
       </View>
+      <Sheet visible={loaded && !progress.ratingSet} canDismiss={false}>
+        <Display size={24}>How much chess do you know?</Display>
+        <Body size={15}>This sets your starting Elo. It moves up and down as you play, like a real rating.</Body>
+        {PLACEMENT.map((o) => (
+          <Card
+            key={o.rating}
+            style={styles.placeRow}
+            onPress={async () => {
+              setProgress(await updateProgress((p) => ({ ...p, rating: o.rating, ratingPeak: o.rating, puzzleRating: o.rating, ratingHistory: [o.rating], ratingSet: true })));
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Display size={17}>{o.name}</Display>
+              <Body size={13}>{o.about}</Body>
+            </View>
+            <Display size={18} color={colors.muted}>{o.rating}</Display>
+          </Card>
+        ))}
+      </Sheet>
+    </View>
+  );
+}
+
+const PLACEMENT = [
+  { rating: 100, name: 'Brand new', about: 'I am still learning how the pieces move' },
+  { rating: 400, name: 'I know the rules', about: 'I can play a game, but I lose pieces' },
+  { rating: 800, name: 'I play sometimes', about: 'I know forks and basic checkmates' },
+  { rating: 1200, name: 'Club player', about: 'I know openings and common tactics' },
+  { rating: 1600, name: 'Strong player', about: 'I calculate and know key endgames' },
+  { rating: 2000, name: 'Expert', about: 'I play in tournaments at a high level' },
+];
+
+function RatingGraph({ history }: { history: number[] }) {
+  const [width, setWidth] = useState(0);
+  const height = 70;
+  const lo = Math.min(...history);
+  const hi = Math.max(...history);
+  const span = Math.max(hi - lo, 40);
+  const x = (i: number) => 6 + (i / Math.max(history.length - 1, 1)) * (width - 12);
+  const y = (r: number) => height - 6 - ((r - lo) / span) * (height - 12);
+  return (
+    <View accessibilityLabel={`Rating graph, from ${history[0]} to ${history[history.length - 1]}`} onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ height, marginTop: 10, borderRadius: 12, backgroundColor: colors.wash, overflow: 'hidden' }}>
+      {width > 0 && (
+        <Svg width={width} height={height}>
+          <Path d={history.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(r).toFixed(1)}`).join('')} fill="none" stroke={colors.sky} strokeWidth={2} strokeLinejoin="round" />
+          <Circle cx={x(history.length - 1)} cy={y(history[history.length - 1])} r={4.5} fill={colors.sky} stroke={colors.wash} strokeWidth={2} />
+        </Svg>
+      )}
     </View>
   );
 }
@@ -71,9 +123,9 @@ function TopBar({ progress }: { progress: Progress }) {
           <ProgressBar value={goal} color={colors.sun} height={14} />
           <Body size={12} bold style={{ marginLeft: 8 }}>{Math.min(progress.dailyXp, DAILY_GOAL)}/{DAILY_GOAL} XP</Body>
         </View>
-        <View style={styles.chip} accessibilityLabel={`${progress.xp} XP`}>
-          <BoltIcon size={22} />
-          <Display size={18} color={colors.sunLip}>{progress.xp}</Display>
+        <View style={[styles.eloChip, { backgroundColor: bandFor(progress.rating).color }]} accessibilityLabel={`${progress.rating} Elo, ${bandFor(progress.rating).name}`}>
+          <Display size={16} color="#FFFFFF">{progress.rating}</Display>
+          <Body size={10} bold color="#FFFFFF">ELO</Body>
         </View>
       </View>
     </View>
@@ -97,6 +149,7 @@ function LearnTab({ progress }: { progress: Progress }) {
   const [open, setOpen] = useState<{ node: PathNode; unit: Unit } | null>(null);
   const current = currentIndex(progress);
   const dailyDone = progress.lastDaily === dayKey();
+  const yourUnit = unitForRating(progress.rating);
   const [hello] = useState(() => pickLine(getTeacher(progress.teacher).hello));
   let index = -1;
 
@@ -131,14 +184,17 @@ function LearnTab({ progress }: { progress: Progress }) {
         {UNITS.map((unit, u) => (
           <View key={unit.title} style={styles.unit}>
             <View style={[styles.unitBanner, { backgroundColor: unit.color, borderBottomColor: unit.lip }]}>
-              <Body size={13} bold color="rgba(255,255,255,0.85)">Unit {u + 1}</Body>
+              <View style={styles.unitTop}>
+                <Body size={13} bold color="#FFFFFF">{`Unit ${u + 1}  ·  ${unit.elo[0]}-${unit.elo[1]} Elo`}</Body>
+                {unit === yourUnit && <View style={styles.yourLevel}><Body size={11} bold color={unit.color}>YOUR LEVEL</Body></View>}
+              </View>
               <Display size={22} color="#FFFFFF">{unit.title}</Display>
               <Body size={14} color="#FFFFFF">{unit.about}</Body>
             </View>
             <View style={styles.path}>
               {unit.nodes.map((node, i) => {
                 index++;
-                const state = node.kind === 'teach' ? (isDone(node, progress) ? 'done' : 'open') : index < current ? 'done' : index === current ? 'current' : 'locked';
+                const state = isDone(node, progress) ? 'done' : isLocked(node, progress) ? 'locked' : index === current ? 'current' : 'open';
                 return (
                   <PathStep
                     key={node.id}
@@ -166,13 +222,13 @@ function LearnTab({ progress }: { progress: Progress }) {
       <Sheet visible={!!open} onClose={() => setOpen(null)}>
         {openNode && (() => {
           const idx = ALL_NODES.indexOf(openNode);
-          const locked = openNode.kind !== 'teach' && idx > current;
+          const locked = isLocked(openNode, progress);
           return (
             <>
               <Display size={24}>{openNode.title}</Display>
               <Body size={16}>{openNode.about}</Body>
               {locked ? (
-                <ChunkyButton label="Finish the earlier steps first" disabled />
+                <ChunkyButton label={`Reach ${open!.unit.elo[0]} Elo to open this`} disabled />
               ) : (
                 <ChunkyButton
                   label={openNode.kind === 'bot' ? `Play ${getBot(openNode.level).name}` : openDone ? 'Practice again' : openNode.kind === 'teach' ? 'Start with your teacher' : 'Start lesson'}
@@ -295,9 +351,10 @@ function PlayTab({ progress, saved, savedLocal }: { progress: Progress; saved: S
 
         <Display size={22} style={{ marginTop: 6 }}>Ways to play</Display>
         <View style={styles.modes}>
+          <ModeTile title="Rated Puzzles" about={`Your puzzle Elo: ${progress.puzzleRating}`} color={colors.ink} lip="#111A22" icon={<Piece type="p" color="w" size={44} />} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'rated' } })} />
           <ModeTile title="Puzzle Rush" about={`3 mistakes and out. Best ${progress.rushBest}`} color={colors.sun} lip={colors.sunLip} icon={<Piece type="n" color="w" size={44} />} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'rush' } })} />
           <ModeTile title="3 Minute Rush" about={`Beat the clock. Best ${progress.blitzBest}`} color={colors.coral} lip={colors.coralLip} icon={<FlameIcon size={38} />} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'blitz' } })} />
-          <ModeTile title="Bot Gauntlet" about={`Beat them in a row. Best ${progress.gauntletBest}/8`} color={colors.grape} lip={colors.grapeLip} icon={<Piece type="q" color="w" size={44} />} onPress={() => router.push({ pathname: '/game', params: { level: '1', color: 'r', gauntlet: '1' } })} />
+          <ModeTile title="Bot Gauntlet" about={`Beat them in a row. Best ${progress.gauntletBest}/${BOTS.length}`} color={colors.grape} lip={colors.grapeLip} icon={<Piece type="q" color="w" size={44} />} onPress={() => router.push({ pathname: '/game', params: { level: '1', color: 'r', gauntlet: '1' } })} />
           <ModeTile title="Endgame Drills" about={`Win it for real. ${Object.keys(progress.endgamesDone).length}/${ENDGAMES.length} done`} color="#2FB5A8" lip="#1F8F84" icon={<Piece type="r" color="w" size={44} />} onPress={() => setShowEndgames(true)} />
           <ModeTile title="Square Sprint" about={`Name the squares. Best ${progress.sprintBest}`} color={colors.sky} lip={colors.skyLip} icon={<Piece type="b" color="w" size={44} />} onPress={() => router.push('/coords')} />
           <ModeTile title={savedLocal ? 'Continue 2 player' : 'Pass and Play'} about={savedLocal ? `${Math.ceil(savedLocal.moves.length / 2)} moves in` : 'Two players, one device'} color={colors.leaf} lip={colors.leafLip} icon={<Piece type="k" color="w" size={44} />} onPress={() => router.push({ pathname: '/local', params: savedLocal ? { resume: '1' } : {} })} />
@@ -310,7 +367,7 @@ function PlayTab({ progress, saved, savedLocal }: { progress: Progress; saved: S
             <View style={{ flex: 1 }}>
               <View style={styles.nameRow}>
                 <Display size={18}>{bot.name}</Display>
-                <Body size={12} bold color={colors.faint}>LEVEL {bot.level}</Body>
+                <Body size={13} bold color={Math.abs(bot.elo - progress.rating) <= 150 ? colors.sky : colors.faint}>{bot.elo} ELO</Body>
               </View>
               <Body size={14}>{bot.blurb}</Body>
             </View>
@@ -329,6 +386,17 @@ function PlayTab({ progress, saved, savedLocal }: { progress: Progress; saved: S
                 <Body>{picked.blurb}</Body>
               </View>
             </View>
+            {(() => {
+              const s = ratingStakes(progress.rating, picked.elo, progress.ratedGames);
+              return (
+                <View style={styles.stakes} accessibilityLabel={`Win plus ${s.win}, draw ${s.draw}, loss ${s.loss}`}>
+                  <Body bold color={colors.ink}>{picked.elo} Elo</Body>
+                  <Body bold color={colors.leafLip}>Win {s.win >= 0 ? '+' : ''}{s.win}</Body>
+                  <Body bold color={colors.muted}>Draw {s.draw >= 0 ? '+' : ''}{s.draw}</Body>
+                  <Body bold color={colors.coral}>Loss {s.loss}</Body>
+                </View>
+              );
+            })()}
             <Body bold color={colors.ink} style={{ marginTop: 4 }}>Play as</Body>
             <View style={styles.colorRow}>
               {(['w', 'r', 'b'] as const).map((c) => (
@@ -410,6 +478,29 @@ function MeTab({ progress, onChange }: { progress: Progress; onChange: (p: Progr
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <Card>
+        <View style={styles.nameRow}>
+          <View>
+            <Display size={38} color={bandFor(progress.rating).color}>{progress.rating}</Display>
+            <Body bold>{bandFor(progress.rating).name}</Body>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Body bold>Peak {progress.ratingPeak}</Body>
+            <Body bold>Puzzles {progress.puzzleRating}</Body>
+            <Body bold>{progress.ratedGames} rated games</Body>
+          </View>
+        </View>
+        {nextBand(progress.rating) && (
+          <View style={{ marginTop: 10 }}>
+            <View style={{ flexDirection: 'row', marginBottom: 4 }}>
+              <ProgressBar value={(progress.rating - bandFor(progress.rating).from) / (nextBand(progress.rating)!.from - bandFor(progress.rating).from)} color={bandFor(progress.rating).color} height={12} />
+            </View>
+            <Body size={12} bold>{nextBand(progress.rating)!.from - progress.rating} Elo to {nextBand(progress.rating)!.name}</Body>
+          </View>
+        )}
+        {progress.ratingHistory.length >= 2 && <RatingGraph history={progress.ratingHistory} />}
+      </Card>
+
       <Card>
         <View style={styles.nameRow}>
           <Display size={24}>Level {level}</Display>
@@ -578,6 +669,11 @@ const styles = StyleSheet.create({
   week: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   day: { alignItems: 'center', gap: 2 },
   statRow: { flexDirection: 'row', gap: 10 },
+  eloChip: { alignItems: 'center', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, minWidth: 48 },
+  placeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  unitTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  yourLevel: { backgroundColor: '#FFFFFF', paddingHorizontal: 8, paddingVertical: 1, borderRadius: 8 },
+  stakes: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: colors.wash, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
   modes: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   modeWrap: { width: '48%', flexGrow: 1 },
   modeFace: { borderRadius: 18, padding: 12, minHeight: 124, gap: 2 },

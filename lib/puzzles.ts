@@ -10,6 +10,7 @@ export interface Puzzle {
   theme: Theme;
   mate: number | null;
   gain: 'q' | 'r' | 'n' | 'p' | null;
+  rating: number; // estimated difficulty, from how deep a search needs to go to see the answer
 }
 
 export const PUZZLES = data as unknown as Puzzle[];
@@ -38,4 +39,11 @@ export function successLine(p: Puzzle): string {
 
 export function puzzlesFor(theme: Theme): Puzzle[] {
   return PUZZLES.filter((p) => p.theme === theme);
+}
+
+/** The unseen puzzle nearest your puzzle rating, with a little variety. */
+export function nextRatedPuzzle(rating: number, seen: Set<string>): Puzzle {
+  const open = PUZZLES.filter((p) => !seen.has(p.id));
+  const pool = (open.length ? open : PUZZLES).slice().sort((a, b) => Math.abs(a.rating - rating) - Math.abs(b.rating - rating));
+  return pool[Math.floor(Math.random() * Math.min(6, pool.length))];
 }

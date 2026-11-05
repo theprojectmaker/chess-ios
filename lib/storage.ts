@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACHIEVEMENTS } from './achievements';
+import { bandFor, START_RATING } from './elo';
 import { showToast } from './toast';
 
 const PROGRESS_KEY = 'chess-progress-v2';
@@ -39,6 +40,13 @@ export interface Progress {
   sprintBest: number;
   gauntletBest: number;
   endgamesDone: Record<string, boolean>;
+  rating: number;
+  ratingSet: boolean;
+  ratingPeak: number;
+  ratedGames: number;
+  ratingHistory: number[];
+  puzzleRating: number;
+  ratedPuzzles: number;
 }
 
 export const DEFAULT_PROGRESS: Progress = {
@@ -72,6 +80,13 @@ export const DEFAULT_PROGRESS: Progress = {
   sprintBest: 0,
   gauntletBest: 0,
   endgamesDone: {},
+  rating: START_RATING,
+  ratingSet: false,
+  ratingPeak: START_RATING,
+  ratedGames: 0,
+  ratingHistory: [],
+  puzzleRating: START_RATING,
+  ratedPuzzles: 0,
 };
 
 // Local calendar day: a UTC date would roll the streak over in the middle of the evening.
@@ -111,6 +126,7 @@ export function updateProgress(change: (p: Progress) => Progress): Promise<Progr
     for (const a of fresh) showToast('New badge', a.name);
     const level = (xp: number) => Math.floor(xp / XP_PER_LEVEL) + 1;
     if (level(next.xp) > level(prior.xp)) showToast('Level up', `You reached level ${level(next.xp)}`);
+    if (prior.ratingSet && bandFor(next.rating).from > bandFor(prior.rating).from) showToast('New rank', `${bandFor(next.rating).name}: ${next.rating} Elo`);
     await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify(next)).catch(() => {});
     return next;
   });
@@ -133,6 +149,11 @@ export function earn(p: Progress, xp: number): Progress {
   return next;
 }
 
+/** Applies a rated game result, keeping the peak and a short history for the graph. */
+export function withRating(p: Progress, rating: number): Progress {
+  return { ...p, rating, ratingPeak: Math.max(p.ratingPeak, rating), ratedGames: p.ratedGames + 1, ratingHistory: [...p.ratingHistory, rating].slice(-40) };
+}
+
 export const resetProgress = () =>
   updateProgress((p) => ({ ...DEFAULT_PROGRESS, sound: p.sound }));
 
@@ -147,6 +168,7 @@ export interface SavedGame {
   mode?: 'standard' | 'shuffle' | 'odds';
   endgame?: string;
   gauntlet?: boolean;
+  assisted?: boolean;
 }
 
 export async function loadSavedGame(): Promise<SavedGame | null> {

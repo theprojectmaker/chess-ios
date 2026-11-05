@@ -14,7 +14,9 @@ import { Body, ChunkyButton, Display, ProgressBar } from '../components/ui';
 import { evaluatePosition, type PositionEval } from '../lib/analysis';
 import { inBook } from '../lib/book';
 import { getBot } from '../lib/bots';
-import { classify, expectedPoints, explainWeakMove, LABEL_ORDER, LABELS, type Label } from '../lib/classify';
+import { classify, expectedPoints, LABEL_ORDER, LABELS, type Label } from '../lib/classify';
+import { coachLine } from '../lib/coaching';
+import { START_RATING } from '../lib/elo';
 import { cancelThinking } from '../lib/engineClient';
 import { getGame, saveAnalysis, type FinishedGame } from '../lib/gameStore';
 import { haptic, play, playMove } from '../lib/sound';
@@ -56,6 +58,7 @@ export default function ReviewScreen() {
   const [view, setView] = useState<'report' | 'walk' | 'retry'>('report');
   const [ply, setPly] = useState(0);
   const [teacherId, setTeacherId] = useState(DEFAULT_PROGRESS.teacher);
+  const [myRating, setMyRating] = useState(START_RATING);
   const teacher = getTeacher(teacherId);
 
   const [retryAt, setRetryAt] = useState(0);
@@ -67,7 +70,10 @@ export default function ReviewScreen() {
 
   useEffect(() => {
     let live = true;
-    loadProgress().then((p) => setTeacherId(p.teacher));
+    loadProgress().then((p) => {
+      setTeacherId(p.teacher);
+      setMyRating(p.rating);
+    });
     getGame(id).then(async (g) => {
       if (!live) return;
       setGame(g);
@@ -114,13 +120,14 @@ export default function ReviewScreen() {
             afterScore: -after.score,
             isBook: standard && inBook(game.san.slice(0, i + 1)),
             previous: i > 0 ? out[i - 1] : null,
+            rating: game.twoPlayer ? undefined : i % 2 === (game.playerColor === 'w' ? 0 : 1) ? myRating : getBot(game.level).elo,
           },
           i > 0 ? game.moves[i - 1].to : undefined,
         ),
       );
     });
     return out;
-  }, [evals, game]);
+  }, [evals, game, myRating]);
 
   if (game === undefined) return <View style={styles.root} />;
   if (!game) {
@@ -326,7 +333,7 @@ export default function ReviewScreen() {
   const best = index >= 0 ? evals[index]?.bestUci ?? null : null;
   const weak = !!label && WEAK.includes(label);
   const betterSan = weak && best ? sanFor(game.fens[index], best) : null;
-  const reason = weak ? explainWeakMove(game.fens[ply], evals[ply]?.bestUci ?? null, betterSan) : null;
+  const reason = weak && label ? coachLine({ rating: myRating, teacher, label, fenAfter: game.fens[ply], replyUci: evals[ply]?.bestUci ?? null, betterSan, scoreBefore: evals[index]?.score, scoreAfter: evals[ply] ? -evals[ply].score : undefined }) : null;
   const voice = label ? teacher.say[label][index % teacher.say[label].length] : null;
   const mood: Mood = label === 'brilliant' || label === 'great' ? 'wow' : weak ? 'sad' : 'happy';
   const nextWeak = nextWeakAfter(ply);

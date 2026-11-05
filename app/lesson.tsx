@@ -10,7 +10,8 @@ import { BoltIcon, BulbIcon, CheckIcon, CloseIcon, FlameIcon, HeartIcon, StarIco
 import { Piece } from '../components/Piece';
 import { Body, ChunkyButton, Display, ProgressBar, Stat } from '../components/ui';
 import { dailyPuzzle, getLesson } from '../lib/path';
-import { PUZZLES, successLine, THEME_INFO, type Puzzle } from '../lib/puzzles';
+import { newRating } from '../lib/elo';
+import { nextRatedPuzzle, PUZZLES, successLine, THEME_INFO, type Puzzle } from '../lib/puzzles';
 import { haptic, play, playMove } from '../lib/sound';
 import { dayKey, DEFAULT_PROGRESS, earn, loadProgress, updateProgress } from '../lib/storage';
 import { getTeacher, pickLine } from '../lib/teachers';
@@ -35,15 +36,34 @@ export default function LessonScreen() {
   const blitz = params.mode === 'blitz';
   const rush = params.mode === 'rush' || blitz;
   const daily = params.mode === 'daily';
+  const rated = params.mode === 'rated';
+  const [myPuzzleRating, setMyPuzzleRating] = useState(0);
+  const [ratingDelta, setRatingDelta] = useState<number | null>(null);
+  const scored = useRef(false);
+  const seen = useRef(new Set<string>());
+  const [ratedList, setRatedList] = useState<Puzzle[]>([]);
   const lesson = params.id ? getLesson(params.id) : undefined;
-  const puzzles = useMemo(() => (rush ? buildRush() : daily ? [dailyPuzzle(dayKey())] : lesson?.puzzles ?? []), [rush, daily, lesson]);
+  const fixedPuzzles = useMemo(() => (rush ? buildRush() : daily ? [dailyPuzzle(dayKey())] : lesson?.puzzles ?? []), [rush, daily, lesson]);
+  const puzzles = rated ? ratedList : fixedPuzzles;
   const [teacherId, setTeacherId] = useState(DEFAULT_PROGRESS.teacher);
   const teacher = getTeacher(teacherId);
   const [line, setLine] = useState('');
   const [combo, setCombo] = useState(0);
   const [bestCombo, setBestCombo] = useState(0);
   useEffect(() => {
-    loadProgress().then((p) => setTeacherId(p.teacher));
+    loadProgress().then((p) => {
+      setTeacherId(p.teacher);
+      if (!rated) return;
+      setMyPuzzleRating(p.puzzleRating);
+      const first = nextRatedPuzzle(p.puzzleRating, seen.current);
+      seen.current.add(first.id);
+      setRatedList([first]);
+      chess.current = new Chess(first.fen);
+      setFen(first.fen);
+      setLastMove(first.last);
+    });
+    // Runs once for this screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -85,6 +105,7 @@ export default function LessonScreen() {
     Animated.timing(panel, { toValue: panelOpen ? 1 : 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
   }, [panelOpen, panel]);
 
+  if (rated && !puzzle && !ended) return <View style={styles.root} />;
   if (!puzzle && !ended) {
     return (
       <View style={[styles.root, styles.center, { paddingTop: insets.top }]}>
@@ -117,8 +138,19 @@ export default function LessonScreen() {
     });
   };
 
-  const loadPuzzle = (i: number) => {
-    const p = puzzles[i];
+  const scorePuzzle = (solved: boolean) => {
+    if (!rated || scored.current) return;
+    scored.current = true;
+    const next = newRating(myPuzzleRating, puzzle.rating, solved ? 1 : 0, 30);
+    setRatingDelta(next - myPuzzleRating);
+    setMyPuzzleRating(next);
+    updateProgress((p) => ({ ...p, puzzleRating: next, ratedPuzzles: p.ratedPuzzles + 1 }));
+  };
+
+  const loadPuzzle = (i: number, list: Puzzle[] = puzzles) => {
+    const p = list[i];
+    scored.current = false;
+    setRatingDelta(null);
     timers.current.forEach(clearTimeout);
     timers.current = [];
     pendingRevert.current = null;
@@ -138,6 +170,12 @@ export default function LessonScreen() {
     const nextIndex = index + 1;
     if (hearts <= 0) {
       finishSession('out', solvedCount, xp, mistakes);
+    } else if (rated) {
+      const next = nextRatedPuzzle(myPuzzleRating, seen.current);
+      seen.current.add(next.id);
+      const list = [...ratedList, next];
+      setRatedList(list);
+      loadPuzzle(nextIndex, list);
     } else if (nextIndex >= puzzles.length) {
       finishSession('complete', solvedCount, xp, mistakes);
     } else {
@@ -164,6 +202,7 @@ export default function LessonScreen() {
       setHearts((h) => h - 1);
       setCombo(0);
       setLine(pickLine(teacher.wrong));
+      scorePuzzle(false);
       const revert = () => {
         pendingRevert.current = null;
         chess.current = new Chess(before);
@@ -184,6 +223,7 @@ export default function LessonScreen() {
     if (step + 1 >= puzzle.line.length) {
       haptic('success');
       setPhase('solved');
+      scorePuzzle(clean);
       const nextCombo = clean ? combo + 1 : 0;
       setCombo(nextCombo);
       setBestCombo((b) => Math.max(b, nextCombo));
@@ -208,6 +248,7 @@ export default function LessonScreen() {
 
   const showAnswer = () => {
     settleWrongMove();
+    scorePuzzle(false);
     const m = parse(puzzle.line[step]);
     setArrow({ from: m.from, to: m.to, color: colors.leaf });
     setPhase('shown');
@@ -236,10 +277,10 @@ export default function LessonScreen() {
         <View style={styles.endInner}>
           <TeacherFace teacher={teacher} size={112} mood={showParty ? 'wow' : 'sad'} />
           <Display size={30} center>
-            {rush ? `${solvedCount} solved` : daily ? (win && solvedCount ? 'Daily puzzle solved' : 'Try again tomorrow') : win ? 'Lesson complete' : 'Out of hearts'}
+            {rated ? `Puzzle rating ${myPuzzleRating}` : rush ? `${solvedCount} solved` : daily ? (win && solvedCount ? 'Daily puzzle solved' : 'Try again tomorrow') : win ? 'Lesson complete' : 'Out of hearts'}
           </Display>
           <Body size={16} center>
-            {blitz ? (secondsLeft === 0 ? 'Time is up!' : 'Run ended after three mistakes.') : rush ? 'Run ended after three mistakes.' : daily ? 'A new puzzle arrives tomorrow.' : win ? (bestCombo >= 3 ? `Best run: ${bestCombo} in a row.` : 'The next step on your path is open.') : 'Try this lesson again to move on.'}
+            {rated ? `${solvedCount} solved this run.` : blitz ? (secondsLeft === 0 ? 'Time is up!' : 'Run ended after three mistakes.') : rush ? 'Run ended after three mistakes.' : daily ? 'A new puzzle arrives tomorrow.' : win ? (bestCombo >= 3 ? `Best run: ${bestCombo} in a row.` : 'The next step on your path is open.') : 'Try this lesson again to move on.'}
           </Body>
           <View style={styles.endStats}>
             <Stat icon={<BoltIcon size={26} />} value={`+${xp}`} label="XP" tint={colors.sunWash} edge={colors.sun} />
@@ -263,7 +304,12 @@ export default function LessonScreen() {
           <Pressable accessibilityRole="button" accessibilityLabel="Leave lesson" onPress={() => router.back()} hitSlop={10}>
             <CloseIcon size={28} />
           </Pressable>
-          {rush ? (
+          {rated ? (
+            <View style={styles.rushScore} accessibilityLabel={`Puzzle rating ${myPuzzleRating}`}>
+              <Display size={20} color={colors.ink}>{myPuzzleRating}</Display>
+              {ratingDelta !== null && <Display size={16} color={ratingDelta >= 0 ? colors.leafLip : colors.coral}>{`  ${ratingDelta >= 0 ? '+' : ''}${ratingDelta}`}</Display>}
+            </View>
+          ) : rush ? (
             <View style={styles.rushScore}><BoltIcon size={24} /><Display size={22} color={colors.sunLip}>{solvedCount}</Display>{blitz && <Display size={18} color={secondsLeft <= 15 ? colors.coral : colors.muted}>{`  ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}`}</Display>}</View>
           ) : (
             <ProgressBar value={(index + (phase === 'solved' ? 1 : 0)) / puzzles.length} />
@@ -282,7 +328,7 @@ export default function LessonScreen() {
         <View style={styles.prompt}>
           <View style={{ flex: 1 }}>
             <Display size={26}>{info!.prompt}</Display>
-            <Body size={15}>{me === 'w' ? 'White' : 'Black'} to move</Body>
+            <Body size={15}>{me === 'w' ? 'White' : 'Black'} to move{rated ? ` · Puzzle rated ${puzzle.rating}` : ''}</Body>
           </View>
           <Piece type="k" color={me} size={46} />
         </View>

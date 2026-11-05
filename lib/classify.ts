@@ -22,7 +22,10 @@ export const LABEL_ORDER: Label[] = ['brilliant', 'great', 'best', 'excellent', 
 const VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 100 };
 
 /** Chance of scoring from this evaluation: 1 is a certain win, 0 a certain loss. */
-export const expectedPoints = (cp: number) => 1 / (1 + Math.exp(-cp / 170));
+export const expectedPoints = (cp: number, scale = 170) => 1 / (1 + Math.exp(-cp / scale));
+
+/** The same evaluation swing costs a newer player less, so grading gets stricter as ratings climb. */
+export const ratingScale = (rating: number) => (rating < 600 ? 240 : rating < 1200 ? 195 : rating < 1800 ? 170 : 145);
 
 export interface MoveFacts {
   fen: string;
@@ -33,6 +36,7 @@ export interface MoveFacts {
   afterScore: number; // the mover's view, after moving
   isBook?: boolean;
   previous?: Label | null; // the opponent's label for the move just before this one
+  rating?: number; // the mover's rating, which sets how strict the grading is
 }
 
 function isSacrifice(fen: string, m: MoveFacts['move']): boolean {
@@ -59,17 +63,18 @@ export function classify(f: MoveFacts, previousTo?: string): Label {
   if (f.isBook) return 'book';
   const uci = f.move.from + f.move.to + (f.move.promotion ?? '');
   const isBest = f.bestUci === uci || f.bestUci === f.move.from + f.move.to;
-  const before = expectedPoints(f.bestScore);
-  const after = expectedPoints(f.afterScore);
+  const scale = f.rating ? ratingScale(f.rating) : 170;
+  const before = expectedPoints(f.bestScore, scale);
+  const after = expectedPoints(f.afterScore, scale);
   const loss = isBest ? 0 : Math.max(0, before - after);
 
   // Near-best, a real sacrifice, and still fine afterwards. "Already winning" is judged by the next
   // best move: a sacrifice that is itself the winning idea must not disqualify itself.
-  const withoutThisMove = expectedPoints(f.secondScore ?? f.bestScore);
+  const withoutThisMove = expectedPoints(f.secondScore ?? f.bestScore, scale);
   if (loss <= 0.02 && withoutThisMove < 0.95 && after > 0.4 && isSacrifice(f.fen, f.move)) return 'brilliant';
 
   if (isBest && f.secondScore !== null) {
-    const gap = before - expectedPoints(f.secondScore);
+    const gap = before - expectedPoints(f.secondScore, scale);
     if (gap >= 0.15 && !isRecapture(f.fen, f.move.to, previousTo)) return 'great';
   }
 

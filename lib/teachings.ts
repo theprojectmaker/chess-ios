@@ -63,6 +63,33 @@ export const TEACHINGS: Teaching[] = [
       { say: 'A skewer is the reverse: attack the big piece, and when it moves you win what stood behind it. Give check on e1.', fen: '4q3/8/8/4k3/8/8/5K2/R7 w - - 0 1', moves: ['a1e1'], done: 'The king must step aside, and the queen behind it is next.' },
     ],
   },
+  {
+    id: 'teach-square', title: 'The rule of the square', about: 'Can a king catch a pawn? Count it without calculating.', piece: 'p',
+    steps: [
+      { say: 'Picture a square from the pawn to the top of the board. If the enemy king cannot step inside it, the pawn cannot be caught. The king is too far away here. Push the pawn.', fen: '8/8/8/8/P7/8/8/5k1K w - - 0 1', moves: ['a4a5'], done: 'The square just got smaller and the king is still outside. This pawn queens.' },
+    ],
+  },
+  {
+    id: 'teach-opposition', title: 'The opposition', about: 'Kings facing off, and who has to give way.', piece: 'k',
+    steps: [
+      { say: 'When kings face each other with one square between them, whoever must move gives way. That is the opposition. Here Black is to move and has it: White cannot get through, and this is a draw.', fen: '8/8/4k3/8/4K3/4P3/8/8 w - - 0 1' },
+      { say: 'Now you can take it. Step your king right in front of the enemy king, two squares away.', fen: '4k3/8/8/3K4/4P3/8/8/8 w - - 0 1', moves: ['d5e6'], done: 'Black must give way, so your king shepherds the pawn home. A king on the 6th in front of its pawn wins.' },
+    ],
+  },
+  {
+    id: 'teach-smothered', title: 'The smothered mate', about: 'A queen sacrifice that wins on the spot.', piece: 'q',
+    steps: [
+      { say: 'The black king has almost no squares. Give up your queen on g8, with check. The king cannot take it, because your knight guards g8. Only the rook can.', fen: '5r1k/6pp/7N/8/8/1Q6/6K1/r7 w - - 0 1', moves: ['b3g8'], done: 'Black has to take with the rook, and that rook now blocks its own king. A sacrifice like this is what the review calls brilliant.' },
+      { say: 'The king is walled in by its own pieces. Deliver the final check with your knight.', fen: '6rk/6pp/7N/8/8/8/6K1/r7 w - - 0 2', moves: ['h6f7'], done: 'Smothered mate. Only a knight can do this, because it jumps over the wall.' },
+    ],
+  },
+  {
+    id: 'teach-lucena', title: 'Building a bridge', about: 'The Lucena position, the most important rook ending.', piece: 'r',
+    steps: [
+      { say: 'Your king is stuck in front of the pawn. The winning idea starts with a quiet move: lift your rook to the 4th rank.', fen: '6K1/4k1P1/8/8/8/8/7r/5R2 w - - 0 1', moves: ['f1f4'], done: 'That rook will soon block the checks. Now the king can walk out.' },
+      { say: 'After a run of checks your king has walked out. Block the last check with your rook. That is the bridge.', fen: '8/3k2P1/8/6K1/5R2/8/6r1/8 w - - 0 1', moves: ['f4g4'], done: 'No more checks, and the pawn queens. Every serious player knows this one.' },
+    ],
+  },
 ];
 
 export function getTeaching(id: string): Teaching | undefined {

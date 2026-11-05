@@ -57,6 +57,23 @@ for (const p of P) {
     // Expected: the highlighted last move belongs to the opponent.
   }
 }
+if (process.argv.includes('--fix')) {
+  let fixed = 0;
+  for (const line of issues['good alternative rejected'] ?? []) {
+    const [id, , step] = line.split(' ');
+    const at = parseInt(step, 10);
+    const p = P.find((x) => x.id === id);
+    if (at === 0 || p.mate) {
+      p.drop = true;
+    } else if (p.line.length > at) {
+      p.line = p.line.slice(0, at - 1);
+      fixed++;
+    }
+  }
+  const kept = P.filter((p) => !p.drop);
+  fs.writeFileSync(path.join(import.meta.dirname, '..', 'lib', 'puzzles.json'), JSON.stringify(kept));
+  console.log(`shortened ${fixed}, removed ${P.length - kept.length}, kept ${kept.length}`);
+}
 console.log(P.length, 'puzzles', JSON.stringify(kinds));
 for (const [k, list] of Object.entries(issues)) {
   console.log(`\n${k}: ${list.length}`);
