@@ -10,7 +10,7 @@ import { useEffect } from 'react';
 import { View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ToastHost } from '../components/ToastHost';
-import { setSoundEnabled } from '../lib/sound';
+import { prepareSounds, setSoundEnabled, setSoundStyle } from '../lib/sound';
 import { loadProgress } from '../lib/storage';
 import { colors } from '../lib/theme';
 
@@ -20,7 +20,11 @@ export default function RootLayout() {
   const [loaded, error] = useFonts({ Fredoka_600SemiBold, Fredoka_700Bold, Nunito_600SemiBold, Nunito_800ExtraBold });
 
   useEffect(() => {
-    loadProgress().then((p) => setSoundEnabled(p.sound));
+    prepareSounds();
+    loadProgress().then((p) => {
+      setSoundEnabled(p.sound);
+      if (p.soundStyle !== 'wood') setSoundStyle(p.soundStyle);
+    });
   }, []);
   useEffect(() => {
     if (loaded || error) SplashScreen.hideAsync().catch(() => {});

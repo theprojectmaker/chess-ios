@@ -34,6 +34,11 @@ export interface Progress {
   dailySolved: number;
   lastDaily: string | null;
   earned: string[];
+  soundStyle: 'wood' | 'soft' | 'arcade';
+  blitzBest: number;
+  sprintBest: number;
+  gauntletBest: number;
+  endgamesDone: Record<string, boolean>;
 }
 
 export const DEFAULT_PROGRESS: Progress = {
@@ -62,6 +67,11 @@ export const DEFAULT_PROGRESS: Progress = {
   dailySolved: 0,
   lastDaily: null,
   earned: [],
+  soundStyle: 'wood',
+  blitzBest: 0,
+  sprintBest: 0,
+  gauntletBest: 0,
+  endgamesDone: {},
 };
 
 // Local calendar day: a UTC date would roll the streak over in the middle of the evening.
@@ -131,6 +141,12 @@ export interface SavedGame {
   playerColor: 'w' | 'b';
   moves: string[];
   hintsLeft: number;
+  startFen?: string;
+  minutes?: number;
+  clocks?: { w: number; b: number };
+  mode?: 'standard' | 'shuffle' | 'odds';
+  endgame?: string;
+  gauntlet?: boolean;
 }
 
 export async function loadSavedGame(): Promise<SavedGame | null> {

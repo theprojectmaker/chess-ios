@@ -8,7 +8,8 @@ import { ActionButton, CapturedRow, capturedFrom } from '../components/gameParts
 import { BackIcon, FlagIcon, FlipIcon, StarIcon, UndoIcon } from '../components/Icons';
 import { Piece } from '../components/Piece';
 import { Body, ChunkyButton, Display, Sheet } from '../components/ui';
-import { setLastGame } from '../lib/gameStore';
+import { recordGame } from '../lib/gameStore';
+import { STANDARD_FEN } from '../lib/variants';
 import { haptic, play, playMove } from '../lib/sound';
 import { clearLocalGame, loadLocalGame, saveLocalGame } from '../lib/storage';
 import { colors, MAX_CONTENT } from '../lib/theme';
@@ -27,6 +28,7 @@ export default function LocalGameScreen() {
   const chess = useRef(new Chess());
   const fens = useRef<string[]>([]);
   const strip = useRef<ScrollView>(null);
+  const gameId = useRef('');
   const [fen, setFen] = useState(() => chess.current.fen());
   const [autoFlip, setAutoFlip] = useState(true);
   const [orientation, setOrientation] = useState<'w' | 'b'>('w');
@@ -80,17 +82,7 @@ export default function LocalGameScreen() {
   const end = (result: Outcome) => {
     clearLocalGame();
     if (flipTimer.current) clearTimeout(flipTimer.current);
-    const verbose = chess.current.history({ verbose: true });
-    setLastGame({
-      twoPlayer: true,
-      result: result.winner === 'w' ? 'win' : result.winner === 'b' ? 'loss' : 'draw',
-      reason: result.reason,
-      level: 0,
-      playerColor: 'w',
-      fens: [...fens.current, chess.current.fen()],
-      san: verbose.map((m) => m.san),
-      moves: verbose.map((m) => ({ from: m.from, to: m.to })),
-    });
+    gameId.current = recordGame(chess.current, { twoPlayer: true, result: result.winner === 'w' ? 'win' : result.winner === 'b' ? 'loss' : 'draw', reason: result.reason, level: 0, playerColor: 'w' }, STANDARD_FEN);
     play(result.winner ? 'win' : 'move');
     haptic('success');
     setTimeout(() => setOutcome(result), 500);
@@ -225,7 +217,7 @@ export default function LocalGameScreen() {
               <Display size={28} center>{outcome.winner ? `${NAME[outcome.winner]} wins` : 'Draw'}</Display>
               <Body size={16} center>{outcome.winner ? `Won ${outcome.reason}` : `Drawn ${outcome.reason}`}</Body>
             </View>
-            <ChunkyButton label="Review game" color={colors.sky} lip={colors.skyLip} onPress={() => router.replace('/review')} />
+            <ChunkyButton label="Review game" color={colors.sky} lip={colors.skyLip} onPress={() => router.replace({ pathname: '/review', params: { id: gameId.current } })} />
             <View style={styles.resultRow}>
               <ChunkyButton style={{ flex: 1 }} label="New game" outline onPress={newGame} />
               <ChunkyButton style={{ flex: 1 }} label="Home" outline onPress={() => router.back()} />

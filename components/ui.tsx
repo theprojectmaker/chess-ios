@@ -3,6 +3,7 @@ import { Animated, Easing, Modal, Platform, Pressable, StyleSheet, Text, View, t
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts, MAX_CONTENT } from '../lib/theme';
 import { haptic } from '../lib/sound';
+import { holdToasts } from '../lib/toast';
 
 const LIP = 5;
 
@@ -97,13 +98,15 @@ export function ProgressBar({ value, color = colors.leaf, height = 16 }: { value
   );
 }
 
-export function Sheet({ visible, onClose, children, canDismiss = true }: { visible: boolean; onClose?: () => void; children: React.ReactNode; canDismiss?: boolean }) {
+export function Sheet({ visible, onClose, children, canDismiss = true, overlay }: { visible: boolean; onClose?: () => void; children: React.ReactNode; canDismiss?: boolean; overlay?: React.ReactNode }) {
   const insets = useSafeAreaInsets();
+  useEffect(() => (visible ? holdToasts() : undefined), [visible]);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={canDismiss ? onClose : undefined}>
       <View style={styles.sheetRoot}>
         <Pressable accessibilityLabel="Close" style={StyleSheet.absoluteFill} onPress={canDismiss ? onClose : undefined} />
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>{children}</View>
+        {overlay}
       </View>
     </Modal>
   );

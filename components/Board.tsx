@@ -22,6 +22,8 @@ interface Props {
   arrow?: { from: string; to: string; color?: string } | null;
   marks?: Record<string, string>;
   badge?: { square: string; kind: 'good' | 'bad'; color?: string; text?: string } | null;
+  hideCoords?: boolean;
+  onSquareTap?: (square: string) => void;
 }
 
 interface Placed {
@@ -110,7 +112,7 @@ const BoardPiece = memo(function BoardPiece({
   );
 });
 
-export function Board({ fen, size, orientation = 'w', movable = null, onMove, lastMove, arrow, marks, badge }: Props) {
+export function Board({ fen, size, orientation = 'w', movable = null, onMove, lastMove, arrow, marks, badge, hideCoords, onSquareTap }: Props) {
   const cell = size / 8;
   const flipped = orientation === 'b';
   const [selected, setSelected] = useState<string | null>(null);
@@ -180,6 +182,8 @@ export function Board({ fen, size, orientation = 'w', movable = null, onMove, la
 
   const live = useRef({ selected, canMove, placed, legal, cell, promo, submit, fromXY, setSelected, setDragId, setHover, movable: movable as string | null });
   live.current = { selected, canMove, placed, legal, cell, promo, submit, fromXY, setSelected, setDragId, setHover, movable };
+  const tapRef = useRef(onSquareTap);
+  tapRef.current = onSquareTap;
   const gesture = useRef({ start: { x: 0, y: 0 }, square: '', id: -1, dragging: false, wasSelected: false, tapMoved: false });
 
   const responder = useRef(
@@ -196,6 +200,11 @@ export function Board({ fen, size, orientation = 'w', movable = null, onMove, la
         g.tapMoved = false;
         if (s.promo) return;
         const sq = s.fromXY(g.start.x, g.start.y);
+        if (tapRef.current) {
+          g.tapMoved = true;
+          tapRef.current(sq);
+          return;
+        }
         g.square = sq;
         g.wasSelected = s.selected === sq;
         if (!s.canMove) return;
@@ -262,8 +271,8 @@ export function Board({ fen, size, orientation = 'w', movable = null, onMove, la
           {mark && <View style={[StyleSheet.absoluteFill, { backgroundColor: mark }]} />}
           {checkSquare === sq && <View style={[StyleSheet.absoluteFill, styles.check]} />}
           {hover === sq && <View style={[StyleSheet.absoluteFill, styles.hover]} />}
-          {col === 0 && <Text style={[styles.coord, styles.coordRank, { color: coordColor, fontSize: cell * 0.2 }]}>{sq[1]}</Text>}
-          {row === 7 && <Text style={[styles.coord, styles.coordFile, { color: coordColor, fontSize: cell * 0.2 }]}>{sq[0]}</Text>}
+          {!hideCoords && col === 0 && <Text style={[styles.coord, styles.coordRank, { color: coordColor, fontSize: cell * 0.2 }]}>{sq[1]}</Text>}
+          {!hideCoords && row === 7 && <Text style={[styles.coord, styles.coordFile, { color: coordColor, fontSize: cell * 0.2 }]}>{sq[0]}</Text>}
         </View>,
       );
     }

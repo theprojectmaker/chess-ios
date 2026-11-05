@@ -10,7 +10,8 @@ import { ACHIEVEMENTS } from '../lib/achievements';
 import { BOTS, getBot, type Bot } from '../lib/bots';
 import { ALL_NODES, currentIndex, isDone, UNITS, type PathNode, type Unit } from '../lib/path';
 import { getTeacher, pickLine, TEACHERS } from '../lib/teachers';
-import { haptic, setSoundEnabled } from '../lib/sound';
+import { haptic, play, setSoundEnabled, setSoundStyle, SOUND_STYLES } from '../lib/sound';
+import { CLOCKS, ENDGAMES, MODE_INFO, type GameMode } from '../lib/variants';
 import { DAILY_GOAL, dayKey, DEFAULT_PROGRESS, loadLocalGame, loadProgress, loadSavedGame, resetProgress, updateProgress, XP_PER_LEVEL, type Progress, type SavedGame, type SavedLocalGame } from '../lib/storage';
 import { colors, fonts, MAX_CONTENT } from '../lib/theme';
 
@@ -246,17 +247,36 @@ function BotAvatar({ bot, size = 56 }: { bot: Bot; size?: number }) {
   );
 }
 
+function ModeTile({ title, about, color, lip, icon, onPress }: { title: string; about: string; color: string; lip: string; icon: React.ReactNode; onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={`${title}. ${about}`} onPress={() => { haptic('light'); onPress(); }} style={styles.modeWrap}>
+      {({ pressed }) => (
+        <View style={{ backgroundColor: lip, borderRadius: 18, paddingBottom: pressed ? 0 : 6, marginTop: pressed ? 6 : 0 }}>
+          <View style={[styles.modeFace, { backgroundColor: color }]}>
+            <View style={styles.modeIcon}>{icon}</View>
+            <Display size={17} color="#FFFFFF">{title}</Display>
+            <Body size={12} bold color="#FFFFFF">{about}</Body>
+          </View>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
 function PlayTab({ progress, saved, savedLocal }: { progress: Progress; saved: SavedGame | null; savedLocal: SavedLocalGame | null }) {
   const router = useRouter();
   const [picked, setPicked] = useState<Bot | null>(null);
   const [color, setColor] = useState<'w' | 'r' | 'b'>('r');
+  const [mode, setMode] = useState<GameMode>('standard');
+  const [minutes, setMinutes] = useState(0);
+  const [showEndgames, setShowEndgames] = useState(false);
   const savedBot = saved ? getBot(saved.level) : null;
 
   return (
     <>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {saved && savedBot && (
-          <Card tint={colors.skyWash} edge={colors.sky} style={styles.row} onPress={() => router.push({ pathname: '/game', params: { resume: '1', level: String(saved.level) } })}>
+          <Card tint={colors.skyWash} edge={colors.sky} style={styles.row} onPress={() => router.push({ pathname: '/game', params: { resume: '1', level: String(saved.level), gauntlet: saved.gauntlet ? '1' : '', endgame: saved.endgame ?? '' } })}>
             <BotAvatar bot={savedBot} size={48} />
             <View style={{ flex: 1 }}>
               <Display size={18}>Continue your game</Display>
@@ -265,24 +285,23 @@ function PlayTab({ progress, saved, savedLocal }: { progress: Progress; saved: S
           </Card>
         )}
 
-        <Card tint={colors.sunWash} edge={colors.sun} style={styles.row} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'rush' } })}>
-          <View style={styles.rushIcon}><BoltIcon size={34} /></View>
+        <Card tint={colors.skyWash} edge={colors.sky} style={styles.row} onPress={() => router.push('/games')}>
+          <View style={styles.rushIcon}><ChartIcon size={30} color={colors.sky} /></View>
           <View style={{ flex: 1 }}>
-            <Display size={20}>Puzzle Rush</Display>
-            <Body color={colors.ink}>Three mistakes and it ends. Best: {progress.rushBest}</Body>
+            <Display size={20}>Review your games</Display>
+            <Body color={colors.ink}>Move grades, your mistakes to retry, and a coach.</Body>
           </View>
         </Card>
 
-        <Card tint={colors.leafWash} edge={colors.leaf} style={styles.row} onPress={() => router.push({ pathname: '/local', params: savedLocal ? { resume: '1' } : {} })}>
-          <View style={styles.rushIcon}>
-            <View style={{ marginRight: -22 }}><Piece type="k" color="w" size={40} /></View>
-            <Piece type="k" color="b" size={40} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Display size={20}>{savedLocal ? 'Continue pass and play' : 'Pass and play'}</Display>
-            <Body color={colors.ink}>{savedLocal ? `${Math.ceil(savedLocal.moves.length / 2)} moves in` : 'Two players on one device, no internet needed.'}</Body>
-          </View>
-        </Card>
+        <Display size={22} style={{ marginTop: 6 }}>Ways to play</Display>
+        <View style={styles.modes}>
+          <ModeTile title="Puzzle Rush" about={`3 mistakes and out. Best ${progress.rushBest}`} color={colors.sun} lip={colors.sunLip} icon={<Piece type="n" color="w" size={44} />} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'rush' } })} />
+          <ModeTile title="3 Minute Rush" about={`Beat the clock. Best ${progress.blitzBest}`} color={colors.coral} lip={colors.coralLip} icon={<FlameIcon size={38} />} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'blitz' } })} />
+          <ModeTile title="Bot Gauntlet" about={`Beat them in a row. Best ${progress.gauntletBest}/8`} color={colors.grape} lip={colors.grapeLip} icon={<Piece type="q" color="w" size={44} />} onPress={() => router.push({ pathname: '/game', params: { level: '1', color: 'r', gauntlet: '1' } })} />
+          <ModeTile title="Endgame Drills" about={`Win it for real. ${Object.keys(progress.endgamesDone).length}/${ENDGAMES.length} done`} color="#2FB5A8" lip="#1F8F84" icon={<Piece type="r" color="w" size={44} />} onPress={() => setShowEndgames(true)} />
+          <ModeTile title="Square Sprint" about={`Name the squares. Best ${progress.sprintBest}`} color={colors.sky} lip={colors.skyLip} icon={<Piece type="b" color="w" size={44} />} onPress={() => router.push('/coords')} />
+          <ModeTile title={savedLocal ? 'Continue 2 player' : 'Pass and Play'} about={savedLocal ? `${Math.ceil(savedLocal.moves.length / 2)} moves in` : 'Two players, one device'} color={colors.leaf} lip={colors.leafLip} icon={<Piece type="k" color="w" size={44} />} onPress={() => router.push({ pathname: '/local', params: savedLocal ? { resume: '1' } : {} })} />
+        </View>
 
         <Display size={22} style={{ marginTop: 10 }}>Choose an opponent</Display>
         {BOTS.map((bot) => (
@@ -326,16 +345,51 @@ function PlayTab({ progress, saved, savedLocal }: { progress: Progress; saved: S
                 </Pressable>
               ))}
             </View>
+            <Body bold color={colors.ink}>Game type</Body>
+            <View style={styles.chipRow}>
+              {(Object.keys(MODE_INFO) as GameMode[]).map((m) => (
+                <Pressable key={m} accessibilityRole="radio" accessibilityState={{ selected: mode === m }} accessibilityLabel={`${MODE_INFO[m].name}. ${MODE_INFO[m].about}`} onPress={() => setMode(m)} style={[styles.modeChip, mode === m && styles.modeChipOn]}>
+                  <Body size={13} bold color={mode === m ? colors.sky : colors.muted}>{MODE_INFO[m].name}</Body>
+                </Pressable>
+              ))}
+            </View>
+            <Body size={13}>{MODE_INFO[mode].about}</Body>
+            <Body bold color={colors.ink}>Clock</Body>
+            <View style={styles.chipRow}>
+              {CLOCKS.map((m) => (
+                <Pressable key={m} accessibilityRole="radio" accessibilityState={{ selected: minutes === m }} accessibilityLabel={m ? `${m} minutes each` : 'No clock'} onPress={() => setMinutes(m)} style={[styles.modeChip, minutes === m && styles.modeChipOn]}>
+                  <Body size={13} bold color={minutes === m ? colors.sky : colors.muted}>{m ? `${m} min` : 'None'}</Body>
+                </Pressable>
+              ))}
+            </View>
             <ChunkyButton
               label="Start game"
               onPress={() => {
                 const level = picked.level;
                 setPicked(null);
-                router.push({ pathname: '/game', params: { level: String(level), color } });
+                router.push({ pathname: '/game', params: { level: String(level), color, mode, minutes: String(minutes) } });
               }}
             />
           </>
         )}
+      </Sheet>
+
+      <Sheet visible={showEndgames} onClose={() => setShowEndgames(false)}>
+        <Display size={24}>Endgame drills</Display>
+        <Body>You start with a won position against the strongest bot. Finish it off.</Body>
+        {ENDGAMES.map((e) => (
+          <Card
+            key={e.id}
+            style={styles.row}
+            onPress={() => {
+              setShowEndgames(false);
+              router.push({ pathname: '/game', params: { endgame: e.id, color: 'w' } });
+            }}
+          >
+            <StarIcon size={26} muted={!progress.endgamesDone[e.id]} />
+            <Display size={17}>{e.name}</Display>
+          </Card>
+        ))}
       </Sheet>
     </>
   );
@@ -440,6 +494,32 @@ function MeTab({ progress, onChange }: { progress: Progress; onChange: (p: Progr
         })}
       </View>
 
+      <Display size={20} style={{ marginTop: 6 }}>Sound style</Display>
+      <View style={styles.styleRow}>
+        {SOUND_STYLES.map((st) => {
+          const on = progress.soundStyle === st.id;
+          return (
+            <Pressable
+              key={st.id}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`${st.name}. ${st.about}`}
+              style={[styles.styleCard, on && { borderColor: colors.sky, backgroundColor: colors.skyWash }]}
+              onPress={async () => {
+                setSoundStyle(st.id);
+                onChange(await updateProgress((p) => ({ ...p, soundStyle: st.id })));
+                play('move');
+                setTimeout(() => play('capture'), 260);
+                setTimeout(() => play('correct'), 560);
+              }}
+            >
+              <Display size={15} center>{st.name}</Display>
+              <Body size={12} center>{st.about}</Body>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <Card style={styles.nameRow}>
         <Body bold color={colors.ink} size={16}>Sound effects</Body>
         <Switch
@@ -498,6 +578,15 @@ const styles = StyleSheet.create({
   week: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   day: { alignItems: 'center', gap: 2 },
   statRow: { flexDirection: 'row', gap: 10 },
+  modes: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  modeWrap: { width: '48%', flexGrow: 1 },
+  modeFace: { borderRadius: 18, padding: 12, minHeight: 124, gap: 2 },
+  modeIcon: { height: 46, justifyContent: 'center' },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  modeChip: { paddingHorizontal: 12, paddingVertical: 7, borderWidth: 2, borderBottomWidth: 4, borderColor: colors.line, borderRadius: 12 },
+  modeChipOn: { borderColor: colors.sky, backgroundColor: colors.skyWash },
+  styleRow: { flexDirection: 'row', gap: 8 },
+  styleCard: { flex: 1, alignItems: 'center', gap: 2, padding: 10, borderWidth: 2, borderBottomWidth: 5, borderColor: colors.line, borderRadius: 14 },
   teachers: { gap: 10, paddingVertical: 2 },
   teacherCard: { width: 132, alignItems: 'center', gap: 4, padding: 10, borderWidth: 2, borderBottomWidth: 5, borderColor: colors.line, borderRadius: 16 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

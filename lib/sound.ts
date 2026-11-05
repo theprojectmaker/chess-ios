@@ -1,39 +1,50 @@
-import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import type { Move } from 'chess.js';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
+import { SOUND_FILES } from './soundFiles';
 
-const SOURCES = {
-  move: require('../assets/sounds/move.wav'),
-  capture: require('../assets/sounds/capture.wav'),
-  check: require('../assets/sounds/check.wav'),
-  correct: require('../assets/sounds/correct.wav'),
-  wrong: require('../assets/sounds/wrong.wav'),
-  win: require('../assets/sounds/win.wav'),
-  lose: require('../assets/sounds/lose.wav'),
-  castle: require('../assets/sounds/castle.wav'),
-  promote: require('../assets/sounds/promote.wav'),
-  start: require('../assets/sounds/start.wav'),
-  combo: require('../assets/sounds/combo.wav'),
-  brilliant: require('../assets/sounds/brilliant.wav'),
-  great: require('../assets/sounds/great.wav'),
-  blunder: require('../assets/sounds/blunder.wav'),
-  inaccuracy: require('../assets/sounds/inaccuracy.wav'),
-  levelup: require('../assets/sounds/levelup.wav'),
-};
-export type SoundName = keyof typeof SOURCES;
+export type SoundStyle = keyof typeof SOUND_FILES;
+export type SoundName = keyof (typeof SOUND_FILES)['wood'];
 
-const players: Partial<Record<SoundName, AudioPlayer>> = {};
+export const SOUND_STYLES: { id: SoundStyle; name: string; about: string }[] = [
+  { id: 'wood', name: 'Wooden board', about: 'Clicks and marimba' },
+  { id: 'soft', name: 'Soft pops', about: 'Rounded and gentle' },
+  { id: 'arcade', name: 'Arcade', about: 'Retro game blips' },
+];
+
 let enabled = true;
+let style: SoundStyle = 'wood';
+const players: Partial<Record<string, AudioPlayer>> = {};
+
+function playerFor(name: SoundName): AudioPlayer {
+  const key = `${style}/${name}`;
+  return (players[key] ??= createAudioPlayer(SOUND_FILES[style][name]));
+}
+
+/** Loads the whole set up front. Loading on first use made the first of each sound arrive late. */
+export function prepareSounds() {
+  setAudioModeAsync({ playsInSilentMode: false, interruptionMode: 'mixWithOthers' }).catch(() => {});
+  try {
+    (Object.keys(SOUND_FILES[style]) as SoundName[]).forEach(playerFor);
+  } catch {
+    // Sounds are optional: playback falls back to loading on demand.
+  }
+}
 
 export function setSoundEnabled(on: boolean) {
   enabled = on;
 }
 
+export function setSoundStyle(next: SoundStyle) {
+  style = SOUND_FILES[next] ? next : 'wood';
+  prepareSounds();
+}
+
 export function play(name: SoundName) {
   if (!enabled) return;
   try {
-    const player = (players[name] ??= createAudioPlayer(SOURCES[name]));
+    const player = playerFor(name);
     player.seekTo(0);
     player.play();
   } catch {

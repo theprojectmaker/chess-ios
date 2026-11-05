@@ -18,6 +18,7 @@ import { colors, MAX_CONTENT } from '../lib/theme';
 
 type Phase = 'solving' | 'reply' | 'wrong' | 'solved' | 'shown';
 const HEARTS = 3;
+const BLITZ_SECONDS = 180;
 const parse = (u: string) => ({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] });
 
 // Easy themes first, so a Rush run starts gently and gets harder the longer you last.
@@ -31,7 +32,8 @@ function buildRush(): Puzzle[] {
 export default function LessonScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ id?: string; mode?: string }>();
-  const rush = params.mode === 'rush';
+  const blitz = params.mode === 'blitz';
+  const rush = params.mode === 'rush' || blitz;
   const daily = params.mode === 'daily';
   const lesson = params.id ? getLesson(params.id) : undefined;
   const puzzles = useMemo(() => (rush ? buildRush() : daily ? [dailyPuzzle(dayKey())] : lesson?.puzzles ?? []), [rush, daily, lesson]);
@@ -71,6 +73,12 @@ export default function LessonScreen() {
   // delayed undo lands on a later puzzle and leaves the board out of step with its solution.
   const settleWrongMove = () => pendingRevert.current?.();
 
+  const [secondsLeft, setSecondsLeft] = useState(BLITZ_SECONDS);
+  useEffect(() => {
+    if (!blitz || ended) return;
+    const timer = setInterval(() => setSecondsLeft((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [blitz, ended]);
   const panel = useRef(new Animated.Value(0)).current;
   const panelOpen = phase === 'wrong' || phase === 'solved' || phase === 'shown';
   useEffect(() => {
@@ -100,7 +108,8 @@ export default function LessonScreen() {
         next.lastDaily = dayKey();
         next.dailySolved = p.dailySolved + 1;
       }
-      if (rush) next.rushBest = Math.max(p.rushBest, solved);
+      if (blitz) next.blitzBest = Math.max(p.blitzBest, solved);
+      else if (rush) next.rushBest = Math.max(p.rushBest, solved);
       if (lesson && result === 'complete') {
         next.lessonsDone = { ...p.lessonsDone, [lesson.id]: Math.max(p.lessonsDone[lesson.id] ?? 0, accuracy) };
       }
@@ -211,6 +220,7 @@ export default function LessonScreen() {
   };
 
   const outOfHearts = hearts <= 0;
+  if (blitz && secondsLeft === 0 && !ended) finishSession('out', solvedCount, xp, mistakes);
   const contentWidth = Math.min(width, MAX_CONTENT + 200);
   const boardSize = Math.floor(Math.max(240, Math.min(contentWidth - 12 - BOARD_CHROME, height - insets.top - insets.bottom - 350)));
   const translateY = panel.interpolate({ inputRange: [0, 1], outputRange: [260, 0] });
@@ -229,7 +239,7 @@ export default function LessonScreen() {
             {rush ? `${solvedCount} solved` : daily ? (win && solvedCount ? 'Daily puzzle solved' : 'Try again tomorrow') : win ? 'Lesson complete' : 'Out of hearts'}
           </Display>
           <Body size={16} center>
-            {rush ? 'Run ended after three mistakes.' : daily ? 'A new puzzle arrives tomorrow.' : win ? (bestCombo >= 3 ? `Best run: ${bestCombo} in a row.` : 'The next step on your path is open.') : 'Try this lesson again to move on.'}
+            {blitz ? (secondsLeft === 0 ? 'Time is up!' : 'Run ended after three mistakes.') : rush ? 'Run ended after three mistakes.' : daily ? 'A new puzzle arrives tomorrow.' : win ? (bestCombo >= 3 ? `Best run: ${bestCombo} in a row.` : 'The next step on your path is open.') : 'Try this lesson again to move on.'}
           </Body>
           <View style={styles.endStats}>
             <Stat icon={<BoltIcon size={26} />} value={`+${xp}`} label="XP" tint={colors.sunWash} edge={colors.sun} />
@@ -254,7 +264,7 @@ export default function LessonScreen() {
             <CloseIcon size={28} />
           </Pressable>
           {rush ? (
-            <View style={styles.rushScore}><BoltIcon size={24} /><Display size={22} color={colors.sunLip}>{solvedCount}</Display></View>
+            <View style={styles.rushScore}><BoltIcon size={24} /><Display size={22} color={colors.sunLip}>{solvedCount}</Display>{blitz && <Display size={18} color={secondsLeft <= 15 ? colors.coral : colors.muted}>{`  ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}`}</Display>}</View>
           ) : (
             <ProgressBar value={(index + (phase === 'solved' ? 1 : 0)) / puzzles.length} />
           )}

@@ -1,10 +1,12 @@
-// Run once: node scripts/gen-sounds.mjs   Synthesizes the app's sound effects, so nothing is licensed.
+// Run: node scripts/gen-sounds.mjs   Synthesizes three selectable sound sets, so nothing is licensed.
+// Piece sounds use modal synthesis: a tiny noise burst rings a few resonators, the way a real strike
+// excites an object. That gives a crisp attack, which plain decaying sine tones cannot.
 import fs from 'node:fs';
 import path from 'node:path';
 
 const RATE = 44100;
-const outDir = path.join(import.meta.dirname, '..', 'assets', 'sounds');
-fs.mkdirSync(outDir, { recursive: true });
+const root = path.join(import.meta.dirname, '..', 'assets', 'sounds');
+fs.rmSync(root, { recursive: true, force: true });
 
 function wav(samples) {
   const data = Buffer.alloc(samples.length * 2);
@@ -25,111 +27,173 @@ function wav(samples) {
   return Buffer.concat([h, data]);
 }
 
-const buf = (seconds) => new Float64Array(Math.floor(seconds * RATE));
-let noiseSeed = 7;
+const buf = (seconds) => new Float64Array(Math.ceil(seconds * RATE));
+let seed = 11;
 const noise = () => {
-  noiseSeed = (noiseSeed * 16807) % 2147483647;
-  return noiseSeed / 1073741823 - 1;
+  seed = (seed * 16807) % 2147483647;
+  return seed / 1073741823 - 1;
 };
+const N = { G3: 196, C4: 261.63, D4: 293.66, E4: 329.63, G4: 392, A4: 440, B4: 493.88, C5: 523.25, D5: 587.33, E5: 659.25, G5: 783.99, A5: 880, C6: 1046.5, E6: 1318.5, G6: 1568, C7: 2093 };
 
-// A wooden piece on a board: inharmonic body modes that die fast, a felt-damped click on the
-// attack, and a low thump from the board underneath.
-function woodHit(out, at, { pitch = 340, level = 0.8, damp = 1 } = {}) {
+// A strike: `modes` are [frequency, decay per second, gain] of the struck object.
+function strike(out, at, modes, level = 1, burstMs = 2.5) {
   const start = Math.floor(at * RATE);
-  const modes = [
-    [1, 1, 62], [1.71, 0.55, 88], [2.63, 0.32, 125], [4.14, 0.14, 190],
-  ];
-  let lp = 0;
-  for (let i = start; i < out.length; i++) {
-    const t = (i - start) / RATE;
-    if (t > 0.3) break;
-    let body = 0;
-    for (const [ratio, amp, decay] of modes) body += amp * Math.sin(2 * Math.PI * pitch * ratio * t) * Math.exp(-t * decay * damp);
-    const thump = 0.9 * Math.sin(2 * Math.PI * 92 * t) * Math.exp(-t * 48);
-    lp += (noise() - lp) * 0.28;
-    const click = lp * 1.7 * Math.exp(-t * 420);
-    const attack = Math.min(1, t * RATE / 12);
-    out[i] += level * attack * (body + thump + click);
+  const burst = Math.floor((burstMs / 1000) * RATE);
+  for (const [freq, decay, gain] of modes) {
+    const r = Math.exp(-decay / RATE);
+    const a1 = 2 * r * Math.cos((2 * Math.PI * freq) / RATE);
+    const a2 = -r * r;
+    let y1 = 0;
+    let y2 = 0;
+    for (let i = start; i < out.length; i++) {
+      const k = i - start;
+      const x = k < burst ? noise() * (1 - k / burst) : 0;
+      const y = x + a1 * y1 + a2 * y2;
+      y2 = y1;
+      y1 = y;
+      out[i] += y * gain * level * (freq / 900) * 0.11;
+    }
   }
 }
+const WOOD = [[210, 75, 0.9], [640, 170, 1], [1180, 260, 0.75], [2350, 420, 0.5], [3900, 700, 0.3]];
+const WOOD_LOW = [[150, 60, 1], [430, 130, 1], [900, 240, 0.7], [1900, 420, 0.4]];
+const WOOD_HIGH = [[300, 95, 0.7], [860, 210, 1], [1650, 340, 0.8], [3100, 560, 0.5]];
 
-// Soft mallet bell: a sine with a few bright partials, for chimes and rewards.
-function bell(out, at, freq, length, level) {
+// Struck bar: a fundamental, its bright 4th partial, and a soft tick on the attack.
+function marimba(out, at, freq, length, level) {
   const start = Math.floor(at * RATE);
   const n = Math.floor(length * RATE);
-  const partials = [[1, 1, 1], [2, 0.42, 1.6], [3, 0.2, 2.4], [4.2, 0.09, 4]];
   for (let i = 0; i < n && start + i < out.length; i++) {
     const t = i / RATE;
-    let s = 0;
-    for (const [ratio, amp, fade] of partials) s += amp * Math.sin(2 * Math.PI * freq * ratio * t) * Math.exp(-t * (fade * 3.6) / length);
-    out[start + i] += level * Math.min(1, t * 900) * s;
+    const s = Math.sin(2 * Math.PI * freq * t) * Math.exp(-t * (3.4 / length))
+      + 0.3 * Math.sin(2 * Math.PI * freq * 3.93 * t) * Math.exp(-t * (15 / length))
+      + 0.1 * Math.sin(2 * Math.PI * freq * 9.2 * t) * Math.exp(-t * 90);
+    out[start + i] += level * Math.min(1, t * 1500) * s;
   }
 }
-
-// Warm falling tone for errors: gentle rather than a harsh buzzer.
-function slide(out, at, from, to, length, level) {
+// Rounded FM tine, like a soft electric piano.
+function tine(out, at, freq, length, level) {
+  const start = Math.floor(at * RATE);
+  const n = Math.floor(length * RATE);
+  for (let i = 0; i < n && start + i < out.length; i++) {
+    const t = i / RATE;
+    const index = 1.5 * Math.exp(-t * 11);
+    out[start + i] += level * Math.min(1, t * 800) * Math.exp(-t * (3.6 / length)) * Math.sin(2 * Math.PI * freq * t + index * Math.sin(2 * Math.PI * freq * 2 * t));
+  }
+}
+// Pitch-dropping sine: the rounded "pop" of a bubble.
+function pop(out, at, from, to, length, level) {
   const start = Math.floor(at * RATE);
   const n = Math.floor(length * RATE);
   let phase = 0;
   for (let i = 0; i < n && start + i < out.length; i++) {
-    const t = i / n;
-    const f = from * Math.pow(to / from, t);
-    phase += (2 * Math.PI * f) / RATE;
-    const env = Math.min(1, t * 40) * Math.pow(1 - t, 1.4);
-    out[start + i] += level * env * (Math.sin(phase) + 0.35 * Math.sin(2 * phase) + 0.12 * Math.sin(3 * phase));
+    const p = i / n;
+    phase += (2 * Math.PI * (from * Math.pow(to / from, Math.min(1, p * 2.2)))) / RATE;
+    out[start + i] += level * Math.min(1, i / 60) * Math.pow(1 - p, 2.2) * Math.sin(phase);
+  }
+}
+// Pulse wave with a fixed duty cycle, softened slightly to take the edge off.
+function chip(out, at, from, to, length, level, duty = 0.25) {
+  const start = Math.floor(at * RATE);
+  const n = Math.floor(length * RATE);
+  let phase = 0;
+  let lp = 0;
+  for (let i = 0; i < n && start + i < out.length; i++) {
+    const p = i / n;
+    phase = (phase + (from * Math.pow(to / from, p)) / RATE) % 1;
+    lp += ((phase < duty ? 1 : -1) - lp) * 0.45;
+    out[start + i] += level * Math.min(1, i / 40) * Math.min(1, (n - i) / 240) * lp;
+  }
+}
+function crunch(out, at, length, level) {
+  const start = Math.floor(at * RATE);
+  const n = Math.floor(length * RATE);
+  let held = 0;
+  for (let i = 0; i < n && start + i < out.length; i++) {
+    if (i % 12 === 0) held = noise();
+    out[start + i] += level * Math.pow(1 - i / n, 2) * held;
   }
 }
 
-// A short room around dry sounds, so they do not feel pasted on.
-function room(out, amount = 0.16) {
-  const lines = [1423, 1871, 2311, 2729].map((d) => ({ d, g: 0.5, buf: new Float64Array(d), i: 0 }));
+function room(out, amount) {
+  if (!amount) return out;
+  const lines = [1103, 1427, 1871, 2311].map((d) => ({ d, b: new Float64Array(d), i: 0 }));
   const res = new Float64Array(out.length);
   for (let n = 0; n < out.length; n++) {
     let wet = 0;
     for (const l of lines) {
-      const y = l.buf[l.i];
-      l.buf[l.i] = out[n] + y * l.g;
+      const y = l.b[l.i];
+      l.b[l.i] = out[n] + y * 0.45;
       l.i = (l.i + 1) % l.d;
       wet += y;
     }
-    res[n] = out[n] + (wet / lines.length) * amount;
+    res[n] = out[n] + (wet / 4) * amount;
   }
   return res;
 }
-
-function finish(out, peak = 0.82, wetAmount = 0.16) {
-  const wet = room(out, wetAmount);
-  let max = 0;
-  for (const s of wet) max = Math.max(max, Math.abs(s));
-  const fadeFrom = wet.length - Math.floor(0.02 * RATE);
-  return Array.from(wet, (s, i) => (s / max) * peak * (i > fadeFrom ? (wet.length - i) / (wet.length - fadeFrom) : 1));
+function finish(out, peak, wet = 0) {
+  const s = room(out, wet);
+  let max = 1e-9;
+  for (const v of s) max = Math.max(max, Math.abs(v));
+  const fade = Math.floor(0.012 * RATE);
+  return Array.from(s, (v, i) => (v / max) * peak * Math.min(1, (s.length - i) / fade));
 }
+const arp = (fn, o, notes, step, len, lvl) => notes.forEach((f, i) => fn(o, i * step, f, len, lvl));
 
-const N = { C5: 523.25, D5: 587.33, E5: 659.25, G5: 783.99, A5: 880, C6: 1046.5, E6: 1318.5, G6: 1568, C7: 2093, G4: 392, E4: 329.63, C4: 261.63, A4: 440 };
+const rewards = (fn, wet) => ({
+  start: () => { const o = buf(0.55); arp(fn, o, [N.G4, N.C5], 0.09, 0.42, 0.5); return finish(o, 0.55, wet); },
+  best: () => { const o = buf(0.4); fn(o, 0, N.E6, 0.32, 0.5); return finish(o, 0.4, wet); },
+  correct: () => { const o = buf(0.62); arp(fn, o, [N.E5, N.A5], 0.09, 0.5, 0.5); return finish(o, 0.72, wet); },
+  combo: () => { const o = buf(0.8); arp(fn, o, [N.C6, N.E6, N.G6, N.C7], 0.065, 0.48, 0.34); return finish(o, 0.74, wet); },
+  great: () => { const o = buf(0.9); arp(fn, o, [N.G5, N.C6, N.E6, N.G6], 0.07, 0.6, 0.34); return finish(o, 0.8, wet); },
+  brilliant: () => { const o = buf(1.6); fn(o, 0, N.C5, 1.3, 0.3); arp(fn, o, [N.C6, N.E6, N.G6, N.C7, N.G6, N.C7, N.E6, N.C7], 0.07, 0.8, 0.26); return finish(o, 0.9, wet * 1.5); },
+  win: () => { const o = buf(1.6); arp(fn, o, [N.C5, N.E5, N.G5, N.C6], 0.11, 0.7, 0.34); [N.C5, N.E5, N.G5, N.C6].forEach((f) => fn(o, 0.5, f, 1, 0.2)); return finish(o, 0.88, wet * 1.4); },
+  levelup: () => { const o = buf(1.2); arp(fn, o, [N.G5, N.C6, N.E6, N.G6, N.C7], 0.08, 0.7, 0.3); return finish(o, 0.82, wet * 1.3); },
+  lose: () => { const o = buf(1); arp(fn, o, [N.E4, N.D4, N.C4], 0.2, 0.62, 0.48); return finish(o, 0.6, wet); },
+  wrong: () => { const o = buf(0.45); arp(fn, o, [N.D4, N.G3], 0.13, 0.32, 0.55); return finish(o, 0.6, wet * 0.5); },
+  inaccuracy: () => { const o = buf(0.3); fn(o, 0, N.B4, 0.26, 0.4); return finish(o, 0.42, wet * 0.5); },
+  blunder: () => { const o = buf(0.85); arp(fn, o, [N.E4, N.D4, N.C4, N.G3], 0.1, 0.5, 0.48); return finish(o, 0.7, wet * 0.5); },
+});
 
-const sounds = {
-  // Peak levels keep the many everyday sounds below the rewards.
-  move: () => { const o = buf(0.22); woodHit(o, 0, { pitch: 360, level: 0.8 }); return finish(o, 0.62, 0.12); },
-  capture: () => { const o = buf(0.3); woodHit(o, 0, { pitch: 290, level: 0.85 }); woodHit(o, 0.06, { pitch: 440, level: 0.62, damp: 1.2 }); return finish(o, 0.74, 0.12); },
-  check: () => { const o = buf(0.5); woodHit(o, 0, { pitch: 360, level: 0.7 }); bell(o, 0.02, N.A5, 0.42, 0.22); return finish(o, 0.72); },
-  castle: () => { const o = buf(0.34); woodHit(o, 0, { pitch: 360, level: 0.75 }); woodHit(o, 0.11, { pitch: 300, level: 0.75 }); return finish(o, 0.66, 0.12); },
-  promote: () => { const o = buf(0.8); woodHit(o, 0, { pitch: 360, level: 0.5 }); [N.G5, N.C6, N.E6].forEach((f, i) => bell(o, 0.05 + i * 0.08, f, 0.6, 0.2)); return finish(o, 0.75); },
-  start: () => { const o = buf(0.62); bell(o, 0, N.G4, 0.5, 0.26); bell(o, 0.1, N.C5, 0.5, 0.26); return finish(o, 0.6); },
-  correct: () => { const o = buf(0.7); bell(o, 0, N.E5, 0.5, 0.3); bell(o, 0.1, N.A5, 0.58, 0.32); return finish(o, 0.76); },
-  combo: () => { const o = buf(0.82); [N.C6, N.E6, N.G6, N.C7].forEach((f, i) => bell(o, i * 0.07, f, 0.5, 0.16)); return finish(o, 0.72); },
-  wrong: () => { const o = buf(0.5); slide(o, 0, 300, 150, 0.2, 0.32); slide(o, 0.17, 225, 112, 0.28, 0.32); return finish(o, 0.62, 0.1); },
-  brilliant: () => { const o = buf(1.5); [N.C6, N.E6, N.G6, N.C7, N.G6, N.C7].forEach((f, i) => bell(o, i * 0.075, f, 0.9, 0.15)); bell(o, 0, N.C5, 1.3, 0.18); return finish(o, 0.84, 0.28); },
-  great: () => { const o = buf(0.9); [N.G5, N.C6, N.E6].forEach((f, i) => bell(o, i * 0.08, f, 0.7, 0.2)); return finish(o, 0.76, 0.22); },
-  blunder: () => { const o = buf(0.9); slide(o, 0, 330, 80, 0.72, 0.42); woodHit(o, 0.02, { pitch: 150, level: 0.4, damp: 0.7 }); return finish(o, 0.68, 0.14); },
-  inaccuracy: () => { const o = buf(0.34); slide(o, 0, 370, 300, 0.26, 0.26); return finish(o, 0.46, 0.1); },
-  win: () => { const o = buf(1.6); [N.C5, N.E5, N.G5, N.C6].forEach((f, i) => bell(o, i * 0.11, f, 0.8, 0.22)); [N.C5, N.E5, N.G5, N.C6].forEach((f) => bell(o, 0.5, f, 1, 0.12)); return finish(o, 0.84, 0.28); },
-  lose: () => { const o = buf(1.1); [N.G4, N.E4, N.C4].forEach((f, i) => bell(o, i * 0.2, f, 0.7, 0.26)); return finish(o, 0.6, 0.2); },
-  levelup: () => { const o = buf(1.3); [N.G5, N.C6, N.E6, N.G6, N.C7].forEach((f, i) => bell(o, i * 0.09, f, 0.8, 0.17)); return finish(o, 0.82, 0.26); },
+const SETS = {
+  wood: {
+    move: () => { const o = buf(0.1); strike(o, 0, WOOD); return finish(o, 0.7); },
+    capture: () => { const o = buf(0.14); strike(o, 0, WOOD_HIGH, 0.7); strike(o, 0.032, WOOD_LOW); return finish(o, 0.85); },
+    check: () => { const o = buf(0.3); strike(o, 0, WOOD); marimba(o, 0.015, N.E6, 0.22, 0.14); return finish(o, 0.78); },
+    castle: () => { const o = buf(0.2); strike(o, 0, WOOD); strike(o, 0.085, WOOD_HIGH, 0.9); return finish(o, 0.72); },
+    promote: () => { const o = buf(0.62); strike(o, 0, WOOD, 0.7); arp(marimba, o, [N.G5, N.C6, N.E6], 0.075, 0.42, 0.14); return finish(o, 0.78, 0.1); },
+    ...rewards(marimba, 0.12),
+  },
+  soft: {
+    move: () => { const o = buf(0.08); pop(o, 0, 760, 400, 0.07, 1); return finish(o, 0.55); },
+    capture: () => { const o = buf(0.14); pop(o, 0, 980, 480, 0.06, 0.8); pop(o, 0.045, 520, 240, 0.09, 1); return finish(o, 0.72); },
+    check: () => { const o = buf(0.3); pop(o, 0, 760, 400, 0.07, 0.8); tine(o, 0.02, N.A5, 0.24, 0.4); return finish(o, 0.68, 0.1); },
+    castle: () => { const o = buf(0.18); pop(o, 0, 720, 400, 0.07, 1); pop(o, 0.08, 880, 480, 0.07, 1); return finish(o, 0.6); },
+    promote: () => { const o = buf(0.6); pop(o, 0, 500, 900, 0.1, 0.5); arp(tine, o, [N.G5, N.C6, N.E6], 0.07, 0.42, 0.3); return finish(o, 0.72, 0.16); },
+    ...rewards(tine, 0.18),
+  },
+  arcade: {
+    move: () => { const o = buf(0.07); chip(o, 0, 520, 780, 0.05, 0.6); return finish(o, 0.42); },
+    capture: () => { const o = buf(0.14); crunch(o, 0, 0.11, 0.7); chip(o, 0, 620, 200, 0.1, 0.5, 0.5); return finish(o, 0.55); },
+    check: () => { const o = buf(0.2); chip(o, 0, 880, 880, 0.07, 0.5); chip(o, 0.09, 1175, 1175, 0.09, 0.5); return finish(o, 0.5); },
+    castle: () => { const o = buf(0.16); chip(o, 0, 520, 700, 0.06, 0.5); chip(o, 0.07, 700, 920, 0.06, 0.5); return finish(o, 0.44); },
+    promote: () => { const o = buf(0.4); [N.G5, N.C6, N.E6, N.G6].forEach((f, i) => chip(o, i * 0.06, f, f, 0.07, 0.5, 0.5)); return finish(o, 0.5); },
+    ...rewards((o, at, f, len, lvl) => chip(o, at, f, f, Math.min(len, 0.16), lvl, 0.25), 0.05),
+  },
 };
 
-for (const [name, make] of Object.entries(sounds)) {
-  const samples = make();
-  fs.writeFileSync(path.join(outDir, `${name}.wav`), wav(samples));
-  const peak = samples.reduce((m, s) => Math.max(m, Math.abs(s)), 0);
-  console.log(name.padEnd(11), `${(samples.length / RATE).toFixed(2)}s`, `peak ${peak.toFixed(2)}`, `${Math.round((samples.length * 2) / 1024)}KB`);
+for (const [set, sounds] of Object.entries(SETS)) {
+  const dir = path.join(root, set);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [name, make] of Object.entries(sounds)) {
+    const s = make();
+    fs.writeFileSync(path.join(dir, `${name}.wav`), wav(s));
+    if (name === 'move' || name === 'capture') {
+      // Sanity numbers, since these cannot be judged by ear here: time until 10% of peak.
+      const peak = Math.max(...s.map(Math.abs));
+      const lastLoud = s.findLastIndex((v) => Math.abs(v) > peak * 0.1);
+      console.log(set.padEnd(7), name.padEnd(8), `ring ${Math.round((lastLoud / RATE) * 1000)}ms`, `peak ${peak.toFixed(2)}`, Number.isNaN(peak) ? 'NAN' : '');
+    }
+  }
 }
+console.log(fs.readdirSync(path.join(root, 'wood')).join(' '));
