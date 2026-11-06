@@ -2,7 +2,9 @@ import { Chess, type Square } from 'chess.js';
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Path } from 'react-native-svg';
-import { colors, fonts } from '../lib/theme';
+import { boardPrefs, colors, fonts, shape, themed } from '../lib/theme';
+
+const MARK = { last: 'rgba(255, 255, 51, 0.48)', selected: 'rgba(255, 255, 51, 0.72)', check: 'rgba(235, 60, 60, 0.75)', dot: 'rgba(20, 30, 20, 0.22)' };
 import { CheckIcon, CloseIcon } from './Icons';
 import { Piece } from './Piece';
 import { webNoSelect } from './ui';
@@ -34,7 +36,7 @@ interface Placed {
 }
 
 const FILES = 'abcdefgh';
-export const BOARD_CHROME = 22;
+export const BOARD_CHROME = 22; // the most a board's base can add around the squares
 const DRAG_LIFT = 0.3;
 
 function placeFromFen(fen: string): Omit<Placed, 'id'>[] {
@@ -169,6 +171,10 @@ export function Board({ fen, size, orientation = 'w', movable = null, onMove, la
     const options = (legal[from] ?? []).filter((m) => m.to === to);
     if (options.length === 0) return false;
     if (options.some((m) => m.promotion)) {
+      if (boardPrefs.autoQueen) {
+        onMove?.({ from, to, promotion: 'q' });
+        return true;
+      }
       setPromo({ from, to });
       return true;
     }
@@ -256,23 +262,25 @@ export function Board({ fen, size, orientation = 'w', movable = null, onMove, la
     }),
   ).current;
 
+  const showCoords = !hideCoords && boardPrefs.showCoords;
+  const style = boardPrefs.board;
   const squares = [];
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
       const sq = FILES[flipped ? 7 - col : col] + (flipped ? row + 1 : 8 - row);
       const dark = (row + col) % 2 === 1;
       let mark: string | null = null;
-      if (lastMove && (lastMove[0] === sq || lastMove[1] === sq)) mark = colors.markLast;
+      if (lastMove && (lastMove[0] === sq || lastMove[1] === sq)) mark = MARK.last;
       if (marks?.[sq]) mark = marks[sq];
-      if (selected === sq) mark = colors.markSelected;
-      const coordColor = dark ? colors.coordOnDark : colors.coordOnLight;
+      if (selected === sq) mark = MARK.selected;
+      const coordColor = dark ? boardPrefs.board.light : boardPrefs.board.dark;
       squares.push(
-        <View key={sq} style={{ width: cell, height: cell, backgroundColor: dark ? colors.squareDark : colors.squareLight }}>
+        <View key={sq} style={{ width: cell, height: cell, backgroundColor: dark ? boardPrefs.board.dark : boardPrefs.board.light }}>
           {mark && <View style={[StyleSheet.absoluteFill, { backgroundColor: mark }]} />}
           {checkSquare === sq && <View style={[StyleSheet.absoluteFill, styles.check]} />}
           {hover === sq && <View style={[StyleSheet.absoluteFill, styles.hover]} />}
-          {!hideCoords && col === 0 && <Text style={[styles.coord, styles.coordRank, { color: coordColor, fontSize: cell * 0.2 }]}>{sq[1]}</Text>}
-          {!hideCoords && row === 7 && <Text style={[styles.coord, styles.coordFile, { color: coordColor, fontSize: cell * 0.2 }]}>{sq[0]}</Text>}
+          {showCoords && col === 0 && <Text style={[styles.coord, styles.coordRank, { color: coordColor, fontSize: cell * 0.2 }]}>{sq[1]}</Text>}
+          {showCoords && row === 7 && <Text style={[styles.coord, styles.coordFile, { color: coordColor, fontSize: cell * 0.2 }]}>{sq[0]}</Text>}
         </View>,
       );
     }
@@ -281,18 +289,18 @@ export function Board({ fen, size, orientation = 'w', movable = null, onMove, la
   const occupied = useMemo(() => new Set(placed.map((p) => p.square)), [placed]);
 
   return (
-    <View style={styles.plinth}>
-      <View style={[styles.board, { width: size, height: size }, webNoSelect]}>
+    <View style={[styles.plinth, style.plinth ? { padding: 7, backgroundColor: style.plinth, borderBottomWidth: 8, borderBottomColor: style.plinthLip, borderRadius: shape.boardRadius + 8 } : null]}>
+      <View style={[styles.board, { width: size, height: size, borderRadius: shape.boardRadius }, webNoSelect]}>
         <View style={styles.grid}>{squares}</View>
 
-        {[...targetSet].map((sq) => {
+        {boardPrefs.showHints && [...targetSet].map((sq) => {
           const { x, y } = toXY(sq);
           return (
             <View key={sq} pointerEvents="none" style={[styles.hintCell, { width: cell, height: cell, transform: [{ translateX: x }, { translateY: y }] }]}>
               {occupied.has(sq) ? (
-                <View style={{ width: cell * 0.94, height: cell * 0.94, borderRadius: cell, borderWidth: cell * 0.09, borderColor: colors.dot }} />
+                <View style={{ width: cell * 0.94, height: cell * 0.94, borderRadius: cell, borderWidth: cell * 0.09, borderColor: MARK.dot }} />
               ) : (
-                <View style={{ width: cell * 0.3, height: cell * 0.3, borderRadius: cell, backgroundColor: colors.dot }} />
+                <View style={{ width: cell * 0.3, height: cell * 0.3, borderRadius: cell, backgroundColor: MARK.dot }} />
               )}
             </View>
           );
@@ -377,13 +385,13 @@ function Arrow({ from, to, cell, size, color }: { from: { x: number; y: number }
   );
 }
 
-const styles = StyleSheet.create({
-  plinth: { padding: 7, backgroundColor: colors.plinth, borderRadius: 18, borderBottomWidth: 8, borderBottomColor: colors.plinthLip, alignSelf: 'center' },
-  board: { borderRadius: 10, overflow: 'hidden' },
+const styles = themed(() => ({
+  plinth: { alignSelf: 'center' },
+  board: { overflow: 'hidden' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', width: '100%', height: '100%' },
   piece: { position: 'absolute', left: 0, top: 0 },
   hintCell: { position: 'absolute', left: 0, top: 0, alignItems: 'center', justifyContent: 'center', zIndex: 3 },
-  check: { backgroundColor: colors.markCheck, borderRadius: 999 },
+  check: { backgroundColor: MARK.check, borderRadius: 999 },
   hover: { borderWidth: 3, borderColor: 'rgba(255,255,255,0.9)' },
   coord: { position: 'absolute', fontFamily: fonts.bold },
   coordRank: { left: 3, top: 1 },
@@ -393,4 +401,4 @@ const styles = StyleSheet.create({
   promoWrap: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 80, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,30,40,0.35)' },
   promoCard: { flexDirection: 'row', gap: 6, backgroundColor: colors.page, padding: 8, borderRadius: 18, borderBottomWidth: 6, borderBottomColor: colors.lineLip },
   promoTile: { backgroundColor: colors.wash, borderRadius: 12 },
-});
+}));

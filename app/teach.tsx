@@ -12,7 +12,7 @@ import { haptic, play, playMove } from '../lib/sound';
 import { DEFAULT_PROGRESS, earn, loadProgress, updateProgress } from '../lib/storage';
 import { getTeacher, pickLine } from '../lib/teachers';
 import { getTeaching } from '../lib/teachings';
-import { colors, MAX_CONTENT } from '../lib/theme';
+import { colors, MAX_CONTENT, themed } from '../lib/theme';
 
 const XP = 15;
 const REPEAT_XP = 5;
@@ -126,7 +126,7 @@ export default function TeachScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   root: { flex: 1, backgroundColor: colors.page },
   center: { alignItems: 'center', justifyContent: 'center', padding: 22 },
   inner: { flex: 1, width: '100%', maxWidth: MAX_CONTENT + 200, alignSelf: 'center' },
@@ -134,4 +134,4 @@ const styles = StyleSheet.create({
   middle: { flex: 1, justifyContent: 'center' },
   footer: { paddingHorizontal: 16 },
   xp: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
-});
+}));

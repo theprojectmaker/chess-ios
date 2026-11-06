@@ -3,7 +3,7 @@ import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { play } from '../lib/sound';
 import { onToast } from '../lib/toast';
-import { colors } from '../lib/theme';
+import { colors, themed } from '../lib/theme';
 import { StarIcon } from './Icons';
 import { Body, Display } from './ui';
 
@@ -51,7 +51,7 @@ export function ToastHost() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   wrap: { position: 'absolute', left: 14, right: 14, alignItems: 'center', zIndex: 1000 },
   card: { flexDirection: 'row', alignItems: 'center', gap: 10, width: '100%', maxWidth: 460, backgroundColor: colors.sunWash, borderWidth: 2, borderBottomWidth: 5, borderColor: colors.sun, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8 },
-});
+}));

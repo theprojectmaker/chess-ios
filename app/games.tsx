@@ -4,10 +4,10 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BackIcon } from '../components/Icons';
 import { Piece } from '../components/Piece';
-import { Body, Card, ChunkyButton, Display } from '../components/ui';
+import { Body, Card, ChunkyButton, Display, Stat } from '../components/ui';
 import { getBot } from '../lib/bots';
 import { loadGames, type StoredGame } from '../lib/gameStore';
-import { colors, MAX_CONTENT } from '../lib/theme';
+import { colors, MAX_CONTENT, themed } from '../lib/theme';
 
 function describe(g: StoredGame) {
   const bot = getBot(g.level);
@@ -43,6 +43,19 @@ export default function GamesScreen() {
             <ChunkyButton style={{ alignSelf: 'stretch', marginTop: 8 }} label="Back to Play" onPress={() => router.back()} />
           </View>
         )}
+        {games && games.some((g) => !g.twoPlayer) && (() => {
+          const bots = games.filter((g) => !g.twoPlayer);
+          const pct = (list: StoredGame[]) => (list.length ? `${Math.round((list.filter((g) => g.result === 'win').length / list.length) * 100)}%` : '--');
+          const graded = bots.filter((g) => g.accuracy !== undefined);
+          const average = graded.length ? `${Math.round(graded.reduce((s, g) => s + (g.accuracy ?? 0), 0) / graded.length)}%` : '--';
+          return (
+            <View style={styles.statRow}>
+              <Stat icon={<Piece type="k" color="w" size={28} />} value={pct(bots.filter((g) => g.playerColor === 'w'))} label="Wins as White" />
+              <Stat icon={<Piece type="k" color="b" size={28} />} value={pct(bots.filter((g) => g.playerColor === 'b'))} label="Wins as Black" />
+              <Stat icon={<Piece type="q" color="w" size={28} />} value={average} label="Accuracy" />
+            </View>
+          );
+        })()}
         {games?.map((g) => {
           const d = describe(g);
           return (
@@ -66,11 +79,12 @@ export default function GamesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   root: { flex: 1, backgroundColor: colors.page },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10, width: '100%', maxWidth: MAX_CONTENT, alignSelf: 'center' },
   list: { padding: 14, gap: 10, width: '100%', maxWidth: MAX_CONTENT, alignSelf: 'center' },
+  statRow: { flexDirection: 'row', gap: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   acc: { alignItems: 'center', minWidth: 62 },
   empty: { alignItems: 'center', gap: 6, paddingTop: 50, paddingHorizontal: 16 },
-});
+}));

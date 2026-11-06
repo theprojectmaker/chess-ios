@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { Board } from '../components/Board';
 import { BoardIcon, BoltIcon, ChartIcon, CheckIcon, FlameIcon, LockIcon, PathIcon, StarIcon } from '../components/Icons';
 import { Piece } from '../components/Piece';
 import { TeacherBubble, TeacherFace } from '../components/TeacherBubble';
@@ -15,7 +16,7 @@ import { getTeacher, pickLine, TEACHERS } from '../lib/teachers';
 import { haptic, play, setSoundEnabled, setSoundStyle, SOUND_STYLES } from '../lib/sound';
 import { CLOCKS, ENDGAMES, MODE_INFO, type GameMode } from '../lib/variants';
 import { DAILY_GOAL, dayKey, DEFAULT_PROGRESS, loadLocalGame, loadProgress, loadSavedGame, resetProgress, updateProgress, XP_PER_LEVEL, type Progress, type SavedGame, type SavedLocalGame } from '../lib/storage';
-import { colors, fonts, MAX_CONTENT } from '../lib/theme';
+import { colors, fonts, MAX_CONTENT, themed, applyBoardPrefs, applyTheme, BOARD_STYLES, isDarkTheme } from '../lib/theme';
 
 type Tab = 'learn' | 'play' | 'me';
 const ZIGZAG = [0, 46, 74, 46, 0, -46, -74, -46];
@@ -23,7 +24,7 @@ const NODE = 74;
 
 export default function Home() {
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<Tab>('learn');
+  const [tab, setTab] = useState<Tab>(isDarkTheme() ? 'play' : 'learn');
   const [progress, setProgress] = useState<Progress>(DEFAULT_PROGRESS);
   const [saved, setSaved] = useState<SavedGame | null>(null);
   const [savedLocal, setSavedLocal] = useState<SavedLocalGame | null>(null);
@@ -351,8 +352,9 @@ function PlayTab({ progress, saved, savedLocal }: { progress: Progress; saved: S
 
         <Display size={22} style={{ marginTop: 6 }}>Ways to play</Display>
         <View style={styles.modes}>
-          <ModeTile title="Rated Puzzles" about={`Your puzzle Elo: ${progress.puzzleRating}`} color={colors.ink} lip="#111A22" icon={<Piece type="p" color="w" size={44} />} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'rated' } })} />
-          <ModeTile title="Puzzle Rush" about={`3 mistakes and out. Best ${progress.rushBest}`} color={colors.sun} lip={colors.sunLip} icon={<Piece type="n" color="w" size={44} />} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'rush' } })} />
+          <ModeTile title="Analysis Board" about="Explore any line with the engine" color="#5B7FF0" lip="#3F5FCC" icon={<Piece type="r" color="w" size={44} />} onPress={() => router.push('/analysis')} />
+          <ModeTile title="Rated Puzzles" about={`Your puzzle Elo: ${progress.puzzleRating}`} color={colors.solid} lip={colors.solidLip} icon={<Piece type="p" color="w" size={44} />} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'rated' } })} />
+          <ModeTile title="Puzzle Rush" about={`3 mistakes and out. Best ${progress.rushBest}`} color="#D98A0B" lip="#A86600" icon={<Piece type="n" color="w" size={44} />} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'rush' } })} />
           <ModeTile title="3 Minute Rush" about={`Beat the clock. Best ${progress.blitzBest}`} color={colors.coral} lip={colors.coralLip} icon={<FlameIcon size={38} />} onPress={() => router.push({ pathname: '/lesson', params: { mode: 'blitz' } })} />
           <ModeTile title="Bot Gauntlet" about={`Beat them in a row. Best ${progress.gauntletBest}/${BOTS.length}`} color={colors.grape} lip={colors.grapeLip} icon={<Piece type="q" color="w" size={44} />} onPress={() => router.push({ pathname: '/game', params: { level: '1', color: 'r', gauntlet: '1' } })} />
           <ModeTile title="Endgame Drills" about={`Win it for real. ${Object.keys(progress.endgamesDone).length}/${ENDGAMES.length} done`} color="#2FB5A8" lip="#1F8F84" icon={<Piece type="r" color="w" size={44} />} onPress={() => setShowEndgames(true)} />
@@ -466,6 +468,11 @@ function PlayTab({ progress, saved, savedLocal }: { progress: Progress; saved: S
 function MeTab({ progress, onChange }: { progress: Progress; onChange: (p: Progress) => void }) {
   const [confirm, setConfirm] = useState(false);
   const level = Math.floor(progress.xp / XP_PER_LEVEL) + 1;
+  const setBoard = async (change: Partial<Progress>) => {
+    const next = await updateProgress((p) => ({ ...p, ...change }));
+    applyBoardPrefs(next);
+    onChange(next);
+  };
   const into = progress.xp % XP_PER_LEVEL;
   const days: { key: string; label: string; active: boolean }[] = [];
   for (let i = 6; i >= 0; i--) {
@@ -585,6 +592,62 @@ function MeTab({ progress, onChange }: { progress: Progress; onChange: (p: Progr
         })}
       </View>
 
+      <Display size={20} style={{ marginTop: 6 }}>App theme</Display>
+      <View style={styles.styleRow}>
+        {([['buddy', 'Buddy', 'Bright, chunky and playful'], ['club', 'Chess Club', 'Dark, flat, classic green board']] as const).map(([id, name, about]) => {
+          const on = progress.appTheme === id;
+          return (
+            <Pressable
+              key={id}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`${name}. ${about}`}
+              style={[styles.styleCard, on && { borderColor: colors.leaf }]}
+              onPress={async () => {
+                const next = await updateProgress((p) => ({ ...p, appTheme: id, boardStyle: id === 'club' ? 'club' : 'buddy', pieceStyle: id === 'club' ? 'flat' : 'chunky' }));
+                applyBoardPrefs(next);
+                applyTheme(id);
+              }}
+            >
+              <Display size={15} center>{name}</Display>
+              <Body size={12} center>{about}</Body>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <Display size={20} style={{ marginTop: 6 }}>Board</Display>
+      <View style={{ alignItems: 'center' }}>
+        <Board key={`${progress.boardStyle}-${progress.pieceStyle}-${progress.showCoords}`} fen="r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 3 3" size={200} lastMove={['g1', 'f3']} />
+      </View>
+      <View style={styles.swatches}>
+        {BOARD_STYLES.map((b) => {
+          const on = progress.boardStyle === b.id;
+          return (
+            <Pressable key={b.id} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={`${b.name} board`} style={[styles.swatch, on && { borderColor: colors.leaf }]} onPress={() => setBoard({ boardStyle: b.id })}>
+              <View style={styles.swatchSquares}>
+                <View style={{ flex: 1, backgroundColor: b.light }} />
+                <View style={{ flex: 1, backgroundColor: b.dark }} />
+              </View>
+              <Body size={11} bold center>{b.name}</Body>
+            </Pressable>
+          );
+        })}
+      </View>
+      <View style={styles.styleRow}>
+        {([['chunky', 'Chunky pieces'], ['flat', 'Flat pieces']] as const).map(([id, name]) => (
+          <Pressable key={id} accessibilityRole="radio" accessibilityState={{ selected: progress.pieceStyle === id }} accessibilityLabel={name} style={[styles.styleCard, progress.pieceStyle === id && { borderColor: colors.leaf }]} onPress={() => setBoard({ pieceStyle: id })}>
+            <Display size={15} center>{name}</Display>
+          </Pressable>
+        ))}
+      </View>
+      {([['showHints', 'Show legal moves'], ['showCoords', 'Show coordinates'], ['autoQueen', 'Always promote to queen']] as const).map(([key, name]) => (
+        <Card key={key} style={styles.nameRow}>
+          <Body bold color={colors.ink} size={16}>{name}</Body>
+          <Switch value={progress[key]} trackColor={{ true: colors.leaf, false: colors.line }} onValueChange={(on) => setBoard({ [key]: on })} />
+        </Card>
+      ))}
+
       <Display size={20} style={{ marginTop: 6 }}>Sound style</Display>
       <View style={styles.styleRow}>
         {SOUND_STYLES.map((st) => {
@@ -643,7 +706,7 @@ function MeTab({ progress, onChange }: { progress: Progress; onChange: (p: Progr
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   root: { flex: 1, backgroundColor: colors.page },
   topBar: { borderBottomWidth: 2, borderBottomColor: colors.line, alignItems: 'center' },
   topInner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 10, width: '100%', maxWidth: MAX_CONTENT },
@@ -669,6 +732,9 @@ const styles = StyleSheet.create({
   week: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   day: { alignItems: 'center', gap: 2 },
   statRow: { flexDirection: 'row', gap: 10 },
+  swatches: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  swatch: { width: '22.5%', flexGrow: 1, padding: 6, gap: 4, borderWidth: 2, borderColor: colors.line, borderRadius: 12 },
+  swatchSquares: { flexDirection: 'row', height: 34, borderRadius: 6, overflow: 'hidden' },
   eloChip: { alignItems: 'center', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, minWidth: 48 },
   placeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   unitTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -690,4 +756,4 @@ const styles = StyleSheet.create({
   tabBar: { flexDirection: 'row', justifyContent: 'center', borderTopWidth: 2, borderTopColor: colors.line, paddingTop: 8, paddingHorizontal: 8, gap: 8 },
   tabItem: { flex: 1, maxWidth: 180 },
   tabFace: { alignItems: 'center', paddingVertical: 5, borderRadius: 14, borderWidth: 2, borderColor: 'transparent' },
-});
+}));

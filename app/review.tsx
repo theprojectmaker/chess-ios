@@ -1,7 +1,7 @@
 import { Chess } from 'chess.js';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, Share, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Board, BOARD_CHROME, type BoardMove } from '../components/Board';
 import { Confetti } from '../components/Confetti';
@@ -21,8 +21,9 @@ import { cancelThinking } from '../lib/engineClient';
 import { getGame, saveAnalysis, type FinishedGame } from '../lib/gameStore';
 import { haptic, play, playMove } from '../lib/sound';
 import { DEFAULT_PROGRESS, earn, loadProgress, updateProgress } from '../lib/storage';
+import { openingName } from '../lib/openings';
 import { getTeacher, pickLine } from '../lib/teachers';
-import { colors, MAX_CONTENT } from '../lib/theme';
+import { colors, MAX_CONTENT, themed, labelWash } from '../lib/theme';
 
 const WEAK: Label[] = ['inaccuracy', 'mistake', 'miss', 'blunder'];
 const LABEL_PHRASE: Record<Label, string> = { brilliant: 'brilliant', great: 'a great move', best: 'the best move', excellent: 'excellent', good: 'good', book: 'a book move', inaccuracy: 'an inaccuracy', mistake: 'a mistake', miss: 'a miss', blunder: 'a blunder' };
@@ -156,6 +157,19 @@ export default function ReviewScreen() {
     ? game.result === 'win' ? 'White won' : game.result === 'loss' ? 'Black won' : 'Draw'
     : game.result === 'win' ? `You beat ${bot.name}` : game.result === 'draw' ? `Draw with ${bot.name}` : `${bot.name} won`;
 
+  const sharePgn = () => {
+    const c = new Chess(game.fens[0]);
+    const bot2 = getBot(game.level);
+    c.setHeader('Event', 'Chess Buddy');
+    c.setHeader('Date', new Date(game.date).toISOString().slice(0, 10).replace(/-/g, '.'));
+    c.setHeader('White', game.twoPlayer ? 'White' : game.playerColor === 'w' ? 'You' : bot2.name);
+    c.setHeader('Black', game.twoPlayer ? 'Black' : game.playerColor === 'b' ? 'You' : bot2.name);
+    const whiteWon = game.twoPlayer ? game.result === 'win' : (game.result === 'win') === (game.playerColor === 'w');
+    c.setHeader('Result', game.result === 'draw' ? '1/2-1/2' : whiteWon ? '1-0' : '0-1');
+    game.moves.forEach((m) => c.move(m));
+    Share.share({ message: c.pgn() }).catch(() => {});
+  };
+
   const closeBtn = (
     <Pressable accessibilityRole="button" accessibilityLabel="Close review" hitSlop={10} onPress={() => (view === 'report' ? router.back() : setView('report'))}>
       {view === 'report' ? <CloseIcon size={28} /> : <BackIcon size={28} />}
@@ -168,7 +182,7 @@ export default function ReviewScreen() {
       : myAccuracy === null ? 'A short one. Play a longer game and I will have more to say.'
       : myAccuracy >= 85 ? `Wonderful control: ${myAccuracy}% accuracy. Let us look at your best moments.`
       : myAccuracy >= 65 ? `Solid, ${myAccuracy}% accuracy. A couple of moves decided this one.`
-      : `You will improve fast from this one. I found ${retryList.length} moves worth a second try.`;
+      : `You will improve fast from this one. I found ${retryList.length} ${retryList.length === 1 ? 'move' : 'moves'} worth a second try.`;
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <ScrollView contentContainerStyle={[styles.report, { paddingBottom: Math.max(insets.bottom, 14) + 8 }]}>
@@ -177,6 +191,7 @@ export default function ReviewScreen() {
             <View style={{ flex: 1 }}>
               <Display size={22}>{resultWord}</Display>
               <Body size={13}>{[game.title, game.reason].filter(Boolean).join(' · ')}</Body>
+              {!game.startFen && openingName(game.san) && <Body size={13} bold numberOfLines={1}>{openingName(game.san)}</Body>}
             </View>
           </View>
           <TeacherBubble teacher={teacher} text={summary} mood={myAccuracy !== null && myAccuracy >= 65 ? 'wow' : 'happy'} />
@@ -227,6 +242,10 @@ export default function ReviewScreen() {
                   }}
                 />
               )}
+              <View style={styles.reportRow}>
+                <ChunkyButton style={{ flex: 1 }} small outline label="Analysis board" onPress={() => router.push({ pathname: '/analysis', params: { fen: game.fens[game.fens.length - 1] } })} />
+                <ChunkyButton style={{ flex: 1 }} small outline label="Share PGN" onPress={sharePgn} />
+              </View>
             </>
           )}
         </ScrollView>
@@ -382,7 +401,7 @@ export default function ReviewScreen() {
             <TeacherBubble
               teacher={teacher}
               mood={mood}
-              tint={label ? LABELS[label].wash : undefined}
+              tint={label ? labelWash(LABELS[label]) : undefined}
               edge={label ? LABELS[label].color : undefined}
               text={label ? `${game.san[index]} is ${LABEL_PHRASE[label]} ${LABELS[label].symbol}. ${reason ?? voice}` : game.san[index]}
             />
@@ -394,7 +413,7 @@ export default function ReviewScreen() {
             const l = labels[i];
             const active = i === index;
             return (
-              <Pressable key={i} accessibilityRole="button" accessibilityLabel={`Move ${Math.floor(i / 2) + 1}, ${san}${l ? `, ${LABELS[l].name}` : ''}`} onPress={() => go(i + 1)} style={[styles.move, active && { backgroundColor: colors.ink }]}>
+              <Pressable key={i} accessibilityRole="button" accessibilityLabel={`Move ${Math.floor(i / 2) + 1}, ${san}${l ? `, ${LABELS[l].name}` : ''}`} onPress={() => go(i + 1)} style={[styles.move, active && { backgroundColor: colors.solid }]}>
                 <Body size={13} bold color={active ? '#FFFFFF' : colors.muted}>{i % 2 === 0 ? `${i / 2 + 1}.` : ''}</Body>
                 <Body size={14} bold color={active ? '#FFFFFF' : l && l !== 'best' && l !== 'excellent' && l !== 'good' ? LABELS[l].color : colors.ink}>
                   {san}{l && ['brilliant', 'great', 'inaccuracy', 'mistake', 'blunder'].includes(l) ? LABELS[l].symbol : ''}
@@ -406,7 +425,8 @@ export default function ReviewScreen() {
 
         <View style={[styles.nav, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <ChunkyButton style={{ flex: 1 }} label="" a11yLabel="Previous move" outline icon={<BackIcon />} disabled={ply === 0} onPress={() => setPly(ply - 1)} />
-          <ChunkyButton style={{ flex: 1.4 }} label="Next slip" small outline disabled={nextWeak === undefined} onPress={() => nextWeak !== undefined && go(nextWeak + 1)} />
+          <ChunkyButton style={{ flex: 1.2 }} label="Analyze" small outline onPress={() => router.push({ pathname: '/analysis', params: { fen: game.fens[ply] } })} />
+          <ChunkyButton style={{ flex: 1.2 }} label="Slip" a11yLabel="Next slip" small outline disabled={nextWeak === undefined} onPress={() => nextWeak !== undefined && go(nextWeak + 1)} />
           <ChunkyButton style={{ flex: 1 }} label="" a11yLabel="Next move" icon={<ForwardIcon color="#FFFFFF" />} disabled={ply >= game.san.length} onPress={() => go(ply + 1)} />
         </View>
       </View>
@@ -414,7 +434,7 @@ export default function ReviewScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   root: { flex: 1, backgroundColor: colors.page },
   center: { alignItems: 'center', justifyContent: 'center', padding: 20 },
   inner: { flex: 1, width: '100%', maxWidth: MAX_CONTENT, alignSelf: 'center' },
@@ -432,5 +452,6 @@ const styles = StyleSheet.create({
   bubble: { minHeight: 66, justifyContent: 'center', paddingHorizontal: 2 },
   moves: { flexDirection: 'row', flexWrap: 'wrap', gap: 2, paddingHorizontal: 10, paddingVertical: 4 },
   move: { flexDirection: 'row', gap: 3, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
+  reportRow: { flexDirection: 'row', gap: 10 },
   nav: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 4 },
-});
+}));

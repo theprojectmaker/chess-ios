@@ -65,3 +65,9 @@ on a network check. Run `npm run test:labels` after changing `lib/classify.ts`, 
   was measured. They are not FIDE or chess.com ratings, and Atlas (2400 here) is far below real Stockfish.
 - Puzzle ratings are estimates from search depth, line length, piece count and a per-theme adjustment, not from real solvers.
   Few puzzles rate above 1700, so the top of the range is thin.
+
+## Themes
+- `lib/theme.ts` holds both app themes, the board styles and board settings. Styles use `themed()` rather than `StyleSheet.create`, so
+  they rebuild per theme. Use `colors.solid`, not `colors.ink`, for any background carrying white text: ink turns white in the dark theme.
+- The dark theme is called Chess Club, not chess.com: the look is modelled on it, but the name, logo and piece art are chess.com's, and
+  Apple can reject apps for using another company's name. All piece art here is original.

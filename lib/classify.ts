@@ -9,7 +9,7 @@ export const LABELS: Record<Label, { name: string; symbol: string; color: string
   great: { name: 'Great', symbol: '!', color: '#3F7FE0', wash: '#E2ECFC' },
   best: { name: 'Best', symbol: '★', color: '#58B92E', wash: '#E8F7DE' },
   excellent: { name: 'Excellent', symbol: '✓', color: '#6FBF3F', wash: '#EEF8E4' },
-  good: { name: 'Good', symbol: '✓', color: '#8FAF6A', wash: '#F1F5E8' },
+  good: { name: 'Good', symbol: '✓', color: '#6E9450', wash: '#F1F5E8' },
   book: { name: 'Book', symbol: 'B', color: '#A88865', wash: '#F4EEE6' },
   inaccuracy: { name: 'Inaccuracy', symbol: '?!', color: '#E8A800', wash: '#FFF5D6' },
   mistake: { name: 'Mistake', symbol: '?', color: '#FF8A1F', wash: '#FFEEDD' },

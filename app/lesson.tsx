@@ -15,7 +15,7 @@ import { nextRatedPuzzle, PUZZLES, successLine, THEME_INFO, type Puzzle } from '
 import { haptic, play, playMove } from '../lib/sound';
 import { dayKey, DEFAULT_PROGRESS, earn, loadProgress, updateProgress } from '../lib/storage';
 import { getTeacher, pickLine } from '../lib/teachers';
-import { colors, MAX_CONTENT } from '../lib/theme';
+import { colors, MAX_CONTENT, themed } from '../lib/theme';
 
 type Phase = 'solving' | 'reply' | 'wrong' | 'solved' | 'shown';
 const HEARTS = 3;
@@ -343,7 +343,7 @@ export default function LessonScreen() {
             lastMove={lastMove}
             badge={badge}
             arrow={arrow}
-            marks={hintSquare ? { [hintSquare]: colors.markGood } : undefined}
+            marks={hintSquare ? { [hintSquare]: 'rgba(88, 185, 46, 0.58)' } : undefined}
           />
         </View>
 
@@ -400,7 +400,7 @@ export default function LessonScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   root: { flex: 1, backgroundColor: colors.page },
   center: { alignItems: 'center', justifyContent: 'center', padding: 20 },
   inner: { flex: 1, width: '100%', maxWidth: MAX_CONTENT + 200, alignSelf: 'center' },
@@ -419,4 +419,4 @@ const styles = StyleSheet.create({
   panelRow: { flexDirection: 'row', gap: 10 },
   endInner: { width: '100%', maxWidth: 440, alignItems: 'center', gap: 10 },
   endStats: { flexDirection: 'row', gap: 10, marginTop: 10, alignSelf: 'stretch' },
-});
+}));

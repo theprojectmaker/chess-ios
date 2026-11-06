@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { LABELS, type Label } from '../lib/classify';
-import { fonts } from '../lib/theme';
+import { fonts, themed } from '../lib/theme';
 
 const BIG: Label[] = ['brilliant', 'great'];
 const SHOWN: Label[] = ['brilliant', 'great', 'best', 'excellent', 'mistake', 'miss', 'blunder'];
@@ -64,8 +64,8 @@ export function MoveBurst({ label, boardSize }: { label: Label; boardSize: numbe
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   wrap: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 90 },
   coin: { alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#FFFFFF' },
   pill: { paddingHorizontal: 14, paddingVertical: 3, borderRadius: 999, borderWidth: 2, borderColor: '#FFFFFF' },
-});
+}));

@@ -73,7 +73,7 @@ function teach(id: string): PathNode {
 }
 
 export const UNITS: Unit[] = ([
-  { title: 'Meet the pieces', about: 'New to chess? Start with your teacher', elo: [100, 300], color: colors.sun, lip: colors.sunLip, nodes: [teach('teach-sliders'), teach('teach-knight-pawn'), teach('teach-mate'), teach('teach-opening'), botNode(1)] },
+  { title: 'Meet the pieces', about: 'New to chess? Start with your teacher', elo: [100, 300], color: '#D98A0B', lip: '#A86600', nodes: [teach('teach-sliders'), teach('teach-knight-pawn'), teach('teach-mate'), teach('teach-opening'), botNode(1)] },
   { title: 'Finish the game', about: 'Checkmate in one move', elo: [200, 450], color: colors.leaf, lip: colors.leafLip, nodes: [...lessons('mate1', 3), botNode(2)] },
   { title: 'Grab what is free', about: 'Stop missing loose pieces', elo: [350, 600], color: colors.sky, lip: colors.skyLip, nodes: [...lessons('hanging', 3), botNode(3)] },
   { title: 'Double attacks', about: 'Hit two targets with one move', elo: [500, 900], color: '#2FB5A8', lip: '#1F8F84', nodes: [teach('teach-fork'), ...lessons('fork', 3), botNode(4)] },

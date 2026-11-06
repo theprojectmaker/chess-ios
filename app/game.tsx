@@ -22,8 +22,9 @@ import { recordGame } from '../lib/gameStore';
 import { getEndgame, MODE_INFO, queenOddsFen, shuffleFen, STANDARD_FEN, type GameMode } from '../lib/variants';
 import { haptic, play, playMove, type SoundName } from '../lib/sound';
 import { clearSavedGame, DEFAULT_PROGRESS, earn, loadProgress, loadSavedGame, saveGame, updateProgress, withRating } from '../lib/storage';
+import { openingName } from '../lib/openings';
 import { getTeacher, pickLine } from '../lib/teachers';
-import { colors, MAX_CONTENT } from '../lib/theme';
+import { colors, MAX_CONTENT, themed, labelWash } from '../lib/theme';
 
 const HINTS = 3;
 const COACH_MS = 220;
@@ -476,7 +477,7 @@ export default function GameScreen() {
             <TeacherBubble
               teacher={teacher}
               mood={feedback?.mood}
-              tint={feedback ? LABELS[feedback.label].wash : undefined}
+              tint={feedback ? labelWash(LABELS[feedback.label]) : undefined}
               edge={feedback ? LABELS[feedback.label].color : undefined}
               text={feedback ? feedback.text : greeting}
               chip={feedback ? (
@@ -489,6 +490,7 @@ export default function GameScreen() {
           </View>
         )}
 
+        {startFen.current === STANDARD_FEN && openingName(history) && <Body size={12} bold style={styles.opening} numberOfLines={1}>{openingName(history)}</Body>}
         <ScrollView ref={moveStrip} horizontal showsHorizontalScrollIndicator={false} style={styles.strip} contentContainerStyle={styles.stripInner}>
           {history.length === 0 && <Body size={14} color={colors.faint}>Moves appear here</Body>}
           {history.map((san, i) => (
@@ -551,7 +553,7 @@ export default function GameScreen() {
               {Object.keys(result.tally).length > 0 && (
                 <View style={styles.tally}>
                   {(['brilliant', 'great', 'best', 'excellent', 'mistake', 'blunder'] as Label[]).filter((l) => result.tally[l]).map((l) => (
-                    <View key={l} style={[styles.tallyChip, { backgroundColor: LABELS[l].wash }]}>
+                    <View key={l} style={[styles.tallyChip, { backgroundColor: labelWash(LABELS[l]) }]}>
                       <LabelDot label={l} size={20} />
                       <Body size={13} bold color={colors.ink}>{result.tally[l]} {LABELS[l].name}</Body>
                     </View>
@@ -575,15 +577,16 @@ export default function GameScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   root: { flex: 1, backgroundColor: colors.page, alignItems: 'center' },
   inner: { flex: 1, width: '100%', maxWidth: MAX_CONTENT + 200, paddingHorizontal: 6 },
   playerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 8, paddingVertical: 6 },
   topNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 6 },
   middle: { flex: 1, justifyContent: 'center' },
   clock: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, backgroundColor: colors.wash, borderWidth: 2, borderColor: colors.line },
-  clockOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+  clockOn: { backgroundColor: colors.solid, borderColor: colors.solid },
   eloRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  opening: { marginHorizontal: 8 },
   run: { flexDirection: 'row', alignItems: 'center', gap: 1 },
   tally: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 4 },
   tallyChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
@@ -598,4 +601,4 @@ const styles = StyleSheet.create({
   resultIcon: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center' },
   xpRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   resultRow: { flexDirection: 'row', gap: 10 },
-});
+}));

@@ -47,6 +47,12 @@ export interface Progress {
   ratingHistory: number[];
   puzzleRating: number;
   ratedPuzzles: number;
+  appTheme: 'buddy' | 'club';
+  boardStyle: string;
+  pieceStyle: 'chunky' | 'flat';
+  showHints: boolean;
+  showCoords: boolean;
+  autoQueen: boolean;
 }
 
 export const DEFAULT_PROGRESS: Progress = {
@@ -87,6 +93,12 @@ export const DEFAULT_PROGRESS: Progress = {
   ratingHistory: [],
   puzzleRating: START_RATING,
   ratedPuzzles: 0,
+  appTheme: 'buddy',
+  boardStyle: 'buddy',
+  pieceStyle: 'chunky',
+  showHints: true,
+  showCoords: true,
+  autoQueen: false,
 };
 
 // Local calendar day: a UTC date would roll the streak over in the middle of the evening.

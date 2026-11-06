@@ -12,7 +12,7 @@ import { recordGame } from '../lib/gameStore';
 import { STANDARD_FEN } from '../lib/variants';
 import { haptic, play, playMove } from '../lib/sound';
 import { clearLocalGame, loadLocalGame, saveLocalGame } from '../lib/storage';
-import { colors, MAX_CONTENT } from '../lib/theme';
+import { colors, MAX_CONTENT, themed } from '../lib/theme';
 
 interface Outcome {
   winner: 'w' | 'b' | null;
@@ -229,7 +229,7 @@ export default function LocalGameScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   root: { flex: 1, backgroundColor: colors.page, alignItems: 'center' },
   inner: { flex: 1, width: '100%', maxWidth: MAX_CONTENT + 200, paddingHorizontal: 6 },
   topNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 6 },
@@ -243,4 +243,4 @@ const styles = StyleSheet.create({
   resultHead: { alignItems: 'center', gap: 6 },
   resultIcon: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center' },
   resultRow: { flexDirection: 'row', gap: 10 },
-});
+}));

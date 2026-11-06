@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import type { Teacher } from '../lib/teachers';
-import { colors } from '../lib/theme';
+import { colors, themed } from '../lib/theme';
 import { Piece } from './Piece';
 import { Body } from './ui';
 
@@ -41,7 +41,7 @@ export function TeacherBubble({ teacher, text, mood, tint, edge, chip }: { teach
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
   bubble: { flex: 1, borderWidth: 2, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, gap: 2 },
-});
+}));

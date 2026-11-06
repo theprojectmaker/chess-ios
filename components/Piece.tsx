@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, Stop } from 'react-native-svg';
+import { boardPrefs } from '../lib/theme';
 
 type PieceColor = 'w' | 'b';
 
@@ -90,6 +91,20 @@ export const Piece = memo(function Piece({ type, color, size }: Props) {
   const c = PALETTE[color];
   if (!shape) return null;
   const gradId = `piece-${color}`;
+  if (boardPrefs.pieces === 'flat') {
+    // Flat look: solid fills and a firm outline, with no shine, drop shadow or raised edge.
+    const fill = color === 'w' ? '#F8F8F8' : '#565352';
+    const line = color === 'w' ? '#3A3836' : '#1E1C1B';
+    return (
+      <Svg width={size} height={size} viewBox="0 0 100 100">
+        {shape.parts.map((d, i) => (
+          <Path key={i} d={d} fill={fill} stroke={line} strokeWidth={3.4} strokeLinejoin="round" />
+        ))}
+        {shape.detail && <Path d={shape.detail} fill="none" stroke={line} strokeWidth={3} strokeLinecap="round" />}
+        {shape.eye && <Circle cx={shape.eye[0]} cy={shape.eye[1]} r={3} fill={line} />}
+      </Svg>
+    );
+  }
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
       <Defs>

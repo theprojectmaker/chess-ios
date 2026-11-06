@@ -10,7 +10,7 @@ import { Body, ChunkyButton, Display, ProgressBar } from '../components/ui';
 import { haptic, play } from '../lib/sound';
 import { DEFAULT_PROGRESS, earn, loadProgress, updateProgress } from '../lib/storage';
 import { getTeacher } from '../lib/teachers';
-import { colors, MAX_CONTENT } from '../lib/theme';
+import { colors, MAX_CONTENT, themed } from '../lib/theme';
 import { STANDARD_FEN } from '../lib/variants';
 
 const SECONDS = 30;
@@ -96,7 +96,7 @@ export default function CoordsScreen() {
           <Body size={16} center>{done ? (newBest ? 'A new best score!' : `Your best is ${best}.`) : `A square is named. Tap it, as many as you can in ${SECONDS} seconds. Your best: ${best}.`}</Body>
           {done && <View style={styles.xp}><BoltIcon size={24} /><Display size={20} color={colors.sunLip}>+{Math.min(score, 40)} XP</Display></View>}
           <ChunkyButton style={styles.full} label="Play from White's side" onPress={() => start('w')} />
-          <ChunkyButton style={styles.full} label="Play from Black's side" color={colors.ink} lip="#111A22" onPress={() => start('b')} />
+          <ChunkyButton style={styles.full} label="Play from Black's side" color={colors.solid} lip={colors.solidLip} onPress={() => start('b')} />
           <ChunkyButton style={styles.full} label="Back" outline onPress={() => router.back()} />
         </View>
       </View>
@@ -123,7 +123,7 @@ export default function CoordsScreen() {
             orientation={orientation}
             hideCoords
             onSquareTap={tap}
-            marks={flash ? { [flash.square]: flash.good ? colors.markGood : colors.markBad } : undefined}
+            marks={flash ? { [flash.square]: flash.good ? 'rgba(88, 185, 46, 0.58)' : 'rgba(255, 92, 92, 0.6)' } : undefined}
           />
         </View>
       </View>
@@ -131,7 +131,7 @@ export default function CoordsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   root: { flex: 1, backgroundColor: colors.page },
   center: { alignItems: 'center', justifyContent: 'center', padding: 20 },
   ready: { width: '100%', maxWidth: 440, alignItems: 'center', gap: 10 },
@@ -140,4 +140,4 @@ const styles = StyleSheet.create({
   inner: { flex: 1, width: '100%', maxWidth: MAX_CONTENT + 200, alignSelf: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 12 },
   targetRow: { alignItems: 'center', paddingBottom: 10 },
-});
+}));

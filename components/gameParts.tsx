@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LABELS, type Label } from '../lib/classify';
-import { colors, fonts } from '../lib/theme';
+import { colors, fonts, themed } from '../lib/theme';
 import { Piece } from './Piece';
 import { Body } from './ui';
 
@@ -57,8 +57,8 @@ export function ActionButton({ label, icon, onPress, disabled, active }: { label
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themed(() => ({
   captured: { flexDirection: 'row', alignItems: 'center', height: 22, paddingRight: 8 },
   action: { flex: 1 },
   actionFace: { alignItems: 'center', gap: 2, paddingVertical: 7, borderWidth: 2, borderColor: colors.line, borderRadius: 14 },
-});
+}));
